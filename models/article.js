@@ -16,10 +16,14 @@ const ArticleSchema = new mongoose.Schema({
     // 'sitio' será "noticias.lat", "pelis.lat", etc.
     sitio: { type: String, required: true, index: true }, 
 
+    // --- NUEVO CAMPO ---
+    resumenIA: { type: String },
+    // -------------------
+
     fuente: String,
     enlaceOriginal: { type: String, unique: true }, // 'unique:true' evita duplicados
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 // Exportamos el modelo para que el resto de la app pueda usarlooa
-module.exports = mongoose.model('Article', ArticleSchema); 
+module.exports = mongoose.model('Article', ArticleSchema);
