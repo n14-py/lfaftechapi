@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const Article = require('../models/Article'); // Importamos el "molde"
+const Article = require('../models/article'); // Importamos el "molde"
 
 /**
  * [PÚBLICO] Obtener LISTA de artículos

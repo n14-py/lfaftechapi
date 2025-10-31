@@ -1,5 +1,5 @@
 const axios = require('axios');
-const Article = require('../models/Article'); // Importamos el "molde"
+const Article = require('../models/article'); // Importamos el "molde"
 
 /**
  * [PRIVADO] Sincronizar GNews con nuestra Base de Datos
