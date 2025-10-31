@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 
 // Este es el "molde" universal para todos los artículos
-// (noticias, pelis, etc., aunque para pelis haremos uno nuevo)
 const ArticleSchema = new mongoose.Schema({
     titulo: { type: String, required: true },
     descripcion: { type: String, required: true },
@@ -16,9 +15,10 @@ const ArticleSchema = new mongoose.Schema({
     // 'sitio' será "noticias.lat", "pelis.lat", etc.
     sitio: { type: String, required: true, index: true }, 
 
-    // --- NUEVO CAMPO ---
-    resumenIA: { type: String },
-    // -------------------
+    // --- CAMBIO DE NOMBRE ---
+    // Ya no es un 'resumen', es el artículo completo.
+    articuloGenerado: { type: String },
+    // ----------------------
 
     fuente: String,
     enlaceOriginal: { type: String, unique: true }, // 'unique:true' evita duplicados

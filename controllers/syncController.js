@@ -1,21 +1,16 @@
 const axios = require('axios');
 const Article = require('../models/article'); // Importamos el "molde"
 
-// --- NUEVA FUNCIÓN DE AYUDA ---
 /**
- * Llama a la API de DeepSeek para generar un resumen.
- * (Usamos el formato compatible con OpenAI)
+ * [NUEVA FUNCIÓN]
+ * Llama a la API de DeepSeek para generar un ARTÍCULO COMPLETO
+ * actuando como un reportero y usando la URL.
  */
-async function getDeepSeekSummary(textoOriginal) {
-    // Si no hay contenido, no gastamos API
-    if (!textoOriginal || textoOriginal.trim().length < 100) {
-        return null; // Devuelve null si el texto es muy corto
+async function getAIArticle(articleUrl) {
+    // Si no hay URL, no podemos hacer nada
+    if (!articleUrl || !articleUrl.startsWith('http')) {
+        return null;
     }
-
-    // Nota: GNews gratis a veces solo da un fragmento.
-    // Le pasamos ese fragmento a DeepSeek. Es más rápido y fiable
-    // que intentar que la IA "visite" la URL (que puede fallar).
-    const textoLimpio = textoOriginal.split(' [')[0]; // Limpia el "read more"
 
     const API_URL = 'https://api.deepseek.com/v1/chat/completions';
     const headers = {
@@ -23,32 +18,32 @@ async function getDeepSeekSummary(textoOriginal) {
         'Content-Type': 'application/json'
     };
 
+    // --- ¡EL NUEVO PROMPT! ---
+    const systemPrompt = "Eres un reportero senior para el portal 'Noticias.lat'. Tu trabajo es escribir artículos de noticias completos, detallados y profesionales. No eres un asistente, eres un periodista. Escribe en un tono formal, objetivo pero atractivo. Debes generar un artículo muy extenso, con múltiples párrafos, desarrollando la información a profundidad. No digas 'según la fuente' o 'el artículo original dice'. Escribe la noticia como si fuera tuya. Responde únicamente con el artículo completo.";
+    
+    const userPrompt = `Por favor, actúa como reportero de Noticias.lat y escribe un artículo de noticias completo, extenso y detallado (idealmente más de 700 palabras) basado en la siguiente URL. Analiza el contenido de este enlace y redáctalo desde cero: ${articleUrl}`;
+    // --- FIN DEL PROMPT ---
+
     const body = {
         model: "deepseek-chat", // O el modelo que estés usando
         messages: [
-            {
-                role: "system",
-                content: "Eres un asistente de noticias. Tu trabajo es leer un artículo y escribir un resumen conciso, profesional y atractivo en español. El resumen debe capturar la idea principal en 2 o 3 frases. No incluyas tu opinión. Responde solo con el resumen."
-            },
-            {
-                role: "user",
-                content: `Genera un resumen para el siguiente artículo:\n\n${textoLimpio}`
-            }
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
         ]
     };
 
     try {
         const response = await axios.post(API_URL, body, { headers });
         if (response.data.choices && response.data.choices.length > 0) {
+            // Retorna el artículo completo
             return response.data.choices[0].message.content;
         }
         return null;
     } catch (error) {
-        console.error("Error llamando a DeepSeek API:", error.message);
-        return null; // Si DeepSeek falla, continuamos sin el resumen
+        console.error(`Error llamando a DeepSeek para la URL ${articleUrl}:`, error.message);
+        return null; // Si DeepSeek falla, continuamos sin el artículo
     }
 }
-// --- FIN DE LA NUEVA FUNCIÓN ---
 
 
 /**
@@ -58,7 +53,6 @@ async function getDeepSeekSummary(textoOriginal) {
 exports.syncGNews = async (req, res) => {
     const API_KEY = process.env.GNEWS_API_KEY;
     
-    // Categorías que SÍ funcionan en el plan gratuito
     const categorias = [
         { gnews: 'general', local: 'general' },
         { gnews: 'sports', local: 'deportes' },
@@ -74,7 +68,6 @@ exports.syncGNews = async (req, res) => {
         for (const cat of categorias) {
             console.log(`Sincronizando categoría: ${cat.local}...`);
             
-            // Trae noticias en español, sin filtro de país (todo LATAM)
             const urlGNews = `https://gnews.io/api/v4/top-headlines?category=${cat.gnews}&lang=es&max=10&apikey=${API_KEY}`;
             
             let gnewsArticles = [];
@@ -84,45 +77,39 @@ exports.syncGNews = async (req, res) => {
             } catch (gnewsError) {
                 console.error(`Error al llamar a GNews para ${cat.gnews}: ${gnewsError.message}`);
                 errores.push(cat.gnews);
-                continue; // Salta a la siguiente categoría si esta falla
+                continue; 
             }
-
-            // --- ¡CAMBIO IMPORTANTE AQUÍ! ---
-            // Reemplazamos el .map() por un bucle for...of
-            // para poder usar 'await' y esperar por el resumen de DeepSeek.
 
             let operations = [];
             for (const article of gnewsArticles) {
                 
-                // ¡AQUÍ LLAMAMOS A LA IA!
-                // Usamos el 'content' que nos da GNews.
-                const resumenIA = await getDeepSeekSummary(article.content); 
+                // --- ¡AQUÍ ESTÁ EL CAMBIO! ---
+                // Le pasamos la URL original a nuestra nueva función de IA
+                const articuloGenerado = await getAIArticle(article.url); 
                 
-                // Preparamos la operación de "Upsert"
                 operations.push({
                     updateOne: {
-                        filter: { enlaceOriginal: article.url }, // Evita duplicados
+                        filter: { enlaceOriginal: article.url }, 
                         update: {
                             $set: {
                                 titulo: article.title,
                                 descripcion: article.description,
-                                contenido: article.content,
+                                contenido: article.content, // Guardamos el original por si acaso
                                 imagen: article.image,
-                                sitio: 'noticias.lat', // Todas pertenecen a este sitio
-                                categoria: cat.local,  // Guardamos la categoría local
+                                sitio: 'noticias.lat', 
+                                categoria: cat.local,  
                                 fuente: article.source.name,
                                 enlaceOriginal: article.url,
                                 fecha: new Date(article.publishedAt),
-                                resumenIA: resumenIA // <-- ¡GUARDAMOS EL RESUMEN!
+                                // --- ¡GUARDAMOS EL NUEVO ARTÍCULO! ---
+                                articuloGenerado: articuloGenerado 
                             }
                         },
-                        upsert: true // Si no existe, lo crea
+                        upsert: true 
                     }
                 });
             }
-            // --- FIN DEL CAMBIO ---
 
-            // Ejecuta todas las operaciones de esta categoría juntas
             if (operations.length > 0) {
                 const result = await Article.bulkWrite(operations);
                 totalNuevos += result.upsertedCount;
@@ -151,22 +138,22 @@ exports.createManualArticle = async (req, res) => {
     try {
         const { titulo, descripcion, imagen, categoria, sitio, fuente, enlaceOriginal, fecha, contenido } = req.body;
         
-        // ¡Podríamos llamar a la IA aquí también!
-        const resumenIA = await getDeepSeekSummary(contenido || descripcion);
+        // Usamos la misma lógica: le pasamos el enlace original
+        const articuloGenerado = await getAIArticle(enlaceOriginal);
 
         const newArticle = new Article({
             titulo, descripcion, imagen, categoria, sitio,
-            contenido: contenido || descripcion, // Relleno por si acaso
+            contenido: contenido || descripcion,
             fuente: fuente || 'Fuente desconocida',
             enlaceOriginal: enlaceOriginal || '#',
             fecha: fecha ? new Date(fecha) : new Date(),
-            resumenIA: resumenIA // <-- Añadido aquí también
+            articuloGenerado: articuloGenerado // Guardamos el artículo de la IA
         });
 
         await newArticle.save();
         res.status(201).json(newArticle);
-    } catch (error) { // <-- ¡ESTA ES LA LLAVE QUE FALTABA!
-        if (error.code === 11000) { // Error de duplicado
+    } catch (error) { 
+        if (error.code === 11000) { 
              return res.status(409).json({ error: "Error: Ya existe un artículo con ese enlace original." });
         }
         console.error("Error en createManualArticle:", error);
