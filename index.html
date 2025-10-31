@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Noticias y tendencias de LATAM - Noticias.lat" />
+  <title>Noticias.lat - Noticias y Tendencias de Latinoamérica</title>
+
+  <!-- Fuentes y librerías -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+  <!-- Google AdSense (opcional) -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=TU-ID-ADSENSE" crossorigin="anonymous"></script>
+
+  <style>
+    :root {
+      --color-principal: #e91e63;
+      --color-fondo: #fafafa;
+      --color-texto: #222;
+      --color-claro: #fff;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: var(--color-fondo);
+      color: var(--color-texto);
+    }
+
+    header {
+      background-color: var(--color-principal);
+      color: #fff;
+      text-align: center;
+      padding: 30px 15px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 2rem;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+
+    main {
+      max-width: 1050px;
+      margin: 40px auto;
+      padding: 0 15px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .news {
+      background: var(--color-claro);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      transition: transform 0.2s ease;
+      cursor: pointer;
+    }
+
+    .news:hover {
+      transform: translateY(-4px);
+    }
+
+    .news img {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+    }
+
+    .news-content {
+      padding: 15px 20px 25px;
+    }
+
+    .news h2 {
+      font-size: 1.1rem;
+      margin: 0 0 8px;
+      color: var(--color-principal);
+    }
+
+    .news small {
+      display: block;
+      font-size: 0.8rem;
+      color: #777;
+      margin-bottom: 10px;
+    }
+
+    .news p {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: #444;
+    }
+
+    footer {
+      background-color: #2a2a2a;
+      color: #ccc;
+      text-align: center;
+      padding: 25px;
+      font-size: 0.9rem;
+      margin-top: 60px;
+    }
+
+    footer a {
+      color: var(--color-principal);
+      text-decoration: none;
+    }
+
+    /* Vista detalle */
+    #modal {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.75);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+
+    .modal-content {
+      background: #fff;
+      max-width: 750px;
+      width: 90%;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .modal-body img {
+      width: 100%;
+      border-radius: 10px;
+      margin-bottom: 10px;
+    }
+
+    .modal-body h2 {
+      margin-top: 0;
+      color: var(--color-principal);
+    }
+
+    .modal-body p {
+      line-height: 1.6;
+      color: #333;
+    }
+
+    .modal-footer {
+      text-align: right;
+      background: #f1f1f1;
+      padding: 10px 20px;
+    }
+
+    .modal-footer button {
+      background: var(--color-principal);
+      border: none;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .modal-footer button:hover {
+      background: #c2185b;
+    }
+
+    /* Espacios para anuncios */
+    .ads-box {
+      text-align: center;
+      margin: 30px 0;
+      background: #f9f9f9;
+      border: 1px dashed #ccc;
+      border-radius: 10px;
+      padding: 15px;
+      color: #999;
+      font-size: 0.9rem;
+    }
+
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>📰 Noticias.lat</h1>
+    <p>Noticias y tendencias de Latinoamérica actualizadas cada día</p>
+  </header>
+
+  <main>
+    <!-- Bloque publicitario superior -->
+    <div class="ads-box">Espacio para anuncio superior (Google Ads)</div>
+
+    <div id="content" class="grid">Cargando noticias...</div>
+
+    <!-- Bloque publicitario inferior -->
+    <div class="ads-box">Espacio para anuncio inferior (Google Ads)</div>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Noticias.lat — Desarrollado por <a href="https://lfaftech.com" target="_blank">LFAF Tech</a>
+  </footer>
+
+  <!-- Modal de noticia -->
+  <div id="modal">
+    <div class="modal-content">
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer">
+        <button id="closeBtn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const apiKey = "44a32900d06784f813f6385bc7b81638"; // ⚠️ Reemplaza por tu token de GNews.io
+    const container = document.getElementById('content');
+    const modal = document.getElementById('modal');
+    const modalBody = document.getElementById('modal-body');
+    const closeBtn = document.getElementById('closeBtn');
+
+    axios.get(`https://gnews.io/api/v4/top-headlines?lang=es&country=mx&max=12&token=${apiKey}`)
+      .then(res => {
+        container.innerHTML = '';
+        res.data.articles.forEach((n, i) => {
+          const articleHTML = `
+            <div class="news" data-index="${i}">
+              ${n.image ? `<img src="${n.image}" alt="imagen">` : ''}
+              <div class="news-content">
+                <h2>${n.title}</h2>
+                <small>${n.source.name} — ${new Date(n.publishedAt).toLocaleDateString()}</small>
+                <p>${n.description || ''}</p>
+              </div>
+            </div>
+          `;
+          container.innerHTML += articleHTML;
+        });
+
+        // Evento click para abrir detalle
+        document.querySelectorAll('.news').forEach((card, i) => {
+          card.addEventListener('click', () => {
+            const n = res.data.articles[i];
+            modalBody.innerHTML = `
+              ${n.image ? `<img src="${n.image}">` : ''}
+              <h2>${n.title}</h2>
+              <small>${n.source.name} — ${new Date(n.publishedAt).toLocaleString()}</small>
+              <p>${n.content || n.description || 'Sin contenido adicional disponible.'}</p>
+              <p><a href="${n.url}" target="_blank">Ver fuente original 🔗</a></p>
+            `;
+            modal.style.display = 'flex';
+          });
+        });
+      })
+      .catch(err => {
+        container.innerHTML = '<p style="text-align:center; color:#e91e63;">Error cargando noticias 😢</p>';
+        console.error(err);
+      });
+
+    closeBtn.addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+
+    modal.addEventListener('click', e => {
+      if (e.target === modal) modal.style.display = 'none';
+    });
+  </script>
+</body>
+</html>
