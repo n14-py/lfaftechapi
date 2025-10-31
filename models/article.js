@@ -21,5 +21,5 @@ const ArticleSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// Exportamos el modelo para que el resto de la app pueda usarloo
+// Exportamos el modelo para que el resto de la app pueda usarlooa
 module.exports = mongoose.model('Article', ArticleSchema); 
