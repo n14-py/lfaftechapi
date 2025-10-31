@@ -1,5 +1,5 @@
 // =============================================
-//         LFAF TECH - API MADRE (v2.1.0)
+//         LFAF TECH - API MADRE (v2.2.0)
 // =============================================
 require('dotenv').config();
 const express = require('express');
@@ -26,10 +26,15 @@ mongoose.connect(process.env.MONGODB_URI)
 // =============================================
 // MODELOS DE DATOS (SCHEMAS)
 // =============================================
+// ¡AQUÍ ESTÁ EL PRIMER CAMBIO!
 const ArticleSchema = new mongoose.Schema({
     titulo: { type: String, required: true },
     descripcion: { type: String, required: true },
     imagen: { type: String, required: true },
+    
+    // ¡NUEVO CAMPO AÑADIDO!
+    contenido: { type: String }, // Aquí guardaremos el resumen largo
+
     categoria: { type: String, required: true, index: true }, 
     fuente: String,
     enlaceOriginal: { type: String, unique: true },
@@ -51,7 +56,7 @@ const requireAdminKey = (req, res, next) => {
 };
 
 // =============================================
-// RUTAS DE LA API PÚBLICA (Para tus 70 sitios)
+// RUTAS DE LA API PÚBLICA
 // =============================================
 
 app.get('/', (req, res) => {
@@ -61,9 +66,7 @@ app.get('/', (req, res) => {
     });
 });
 
-/**
- * [PÚBLICO] Obtener LISTA de artículos por categoría
- */
+// Ruta de Lista (sin cambios)
 app.get('/api/articles', async (req, res) => {
     try {
         const { categoria, limite, pagina } = req.query;
@@ -93,28 +96,18 @@ app.get('/api/articles', async (req, res) => {
     }
 });
 
-// =============================================
-// ¡NUEVA RUTA!
-// [PÚBLICO] Obtener UN solo artículo por su ID
-// Esta es la ruta que usará tu pagina 'articulo.html'
-// =============================================
+// Ruta de Detalle (sin cambios)
 app.get('/api/article/:id', async (req, res) => {
     try {
         const articleId = req.params.id;
-
-        // Validar que el ID sea un ID de Mongo válido
         if (!mongoose.Types.ObjectId.isValid(articleId)) {
             return res.status(400).json({ error: "ID de artículo no válido." });
         }
-
         const article = await Article.findById(articleId);
-
         if (!article) {
             return res.status(404).json({ error: "Artículo no encontrado." });
         }
-
-        res.json(article); // Devuelve el artículo individual
-
+        res.json(article);
     } catch (error) {
         console.error("Error en GET /api/article/:id:", error);
         res.status(500).json({ error: "Error interno del servidor." });
@@ -138,6 +131,7 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
         const gnewsArticles = response.data.articles;
         let nuevosArticulosGuardados = 0;
 
+        // ¡AQUÍ ESTÁ EL SEGUNDO CAMBIO!
         const operations = gnewsArticles.map(article => {
             return Article.updateOne(
                 { enlaceOriginal: article.url },
@@ -146,6 +140,10 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
                         titulo: article.title,
                         descripcion: article.description,
                         imagen: article.image,
+                        
+                        // ¡NUEVA LÍNEA! Guardamos el contenido largo
+                        contenido: article.content, 
+
                         categoria: 'noticias.lat',
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
@@ -155,6 +153,7 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
                 { upsert: true }
             );
         });
+        // --- FIN DEL CAMBIO ---
 
         const results = await Promise.all(operations);
         results.forEach(r => {
@@ -166,7 +165,8 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
         res.json({ 
             message: "Sincronización con GNews completada", 
             articulosRecibidos: gnewsArticles.length,
-            nuevosArticulosGuardados: nuevosArticulosGuardados
+            nuevosArticulosGuardados: nuevosArticulosGuardados,
+            articulosActualizados: results.length - nuevosArticulosGuardados
         });
     } catch (error) {
         console.error("Error en /api/sync-gnews:", error.message);
@@ -180,7 +180,19 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
  */
 app.post('/api/articles', requireAdminKey, async (req, res) => {
     try {
-        const newArticle = new Article(req.body);
+        // ¡AQUÍ ESTÁ EL TERCER CAMBIO!
+        const { titulo, descripcion, imagen, categoria, fuente, enlaceOriginal, fecha, contenido } = req.body;
+        
+        const newArticle = new Article({
+            titulo, descripcion, imagen, categoria,
+            // Si no nos mandan 'contenido', usamos 'descripcion' como relleno.
+            contenido: contenido || descripcion, 
+            fuente: fuente || 'Fuente desconocida',
+            enlaceOriginal: enlaceOriginal || '#',
+            fecha: fecha ? new Date(fecha) : new Date()
+        });
+        // --- FIN DEL CAMBIO ---
+
         await newArticle.save();
         res.status(201).json(newArticle);
     } catch (error) {
@@ -195,5 +207,5 @@ app.post('/api/articles', requireAdminKey, async (req, res) => {
 // INICIAR SERVIDOR
 // =============================================
 app.listen(PORT, () => {
-    console.log(`🚀 API Central LFAF Tech (v2.1) corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 API Central LFAF Tech (v2.2) corriendo en http://localhost:${PORT}`);
 });
