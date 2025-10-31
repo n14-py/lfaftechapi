@@ -1,14 +1,11 @@
 // =============================================
-//         LFAF TECH - API MADRE (v2.0.0)
-// =============================================
-
-// IMPORTACIONES Y CONFIGURACIÓN INICIAL
+//         LFAF TECH - API MADRE (v2.1.0)
 // =============================================
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const axios = require('axios'); // <-- NUEVA IMPORTACIÓN
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,14 +32,14 @@ const ArticleSchema = new mongoose.Schema({
     imagen: { type: String, required: true },
     categoria: { type: String, required: true, index: true }, 
     fuente: String,
-    enlaceOriginal: { type: String, unique: true }, // <-- Hacemos el enlace único
+    enlaceOriginal: { type: String, unique: true },
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 const Article = mongoose.model('Article', ArticleSchema);
 
 // =============================================
-// MIDDLEWARE DE AUTENTICACIÓN (PARA PROTEGER TU API)
+// MIDDLEWARE DE AUTENTICACIÓN
 // =============================================
 const requireAdminKey = (req, res, next) => {
     const apiKey = req.headers['x-api-key'];
@@ -64,6 +61,9 @@ app.get('/', (req, res) => {
     });
 });
 
+/**
+ * [PÚBLICO] Obtener LISTA de artículos por categoría
+ */
 app.get('/api/articles', async (req, res) => {
     try {
         const { categoria, limite, pagina } = req.query;
@@ -94,48 +94,69 @@ app.get('/api/articles', async (req, res) => {
 });
 
 // =============================================
+// ¡NUEVA RUTA!
+// [PÚBLICO] Obtener UN solo artículo por su ID
+// Esta es la ruta que usará tu pagina 'articulo.html'
+// =============================================
+app.get('/api/article/:id', async (req, res) => {
+    try {
+        const articleId = req.params.id;
+
+        // Validar que el ID sea un ID de Mongo válido
+        if (!mongoose.Types.ObjectId.isValid(articleId)) {
+            return res.status(400).json({ error: "ID de artículo no válido." });
+        }
+
+        const article = await Article.findById(articleId);
+
+        if (!article) {
+            return res.status(404).json({ error: "Artículo no encontrado." });
+        }
+
+        res.json(article); // Devuelve el artículo individual
+
+    } catch (error) {
+        console.error("Error en GET /api/article/:id:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+});
+
+
+// =============================================
 // RUTAS DE LA API PRIVADA (Para ti y GNews)
 // =============================================
 
 /**
  * [PRIVADO] Sincronizar GNews con nuestra Base de Datos
- * Esta es la nueva ruta que llenará tu base de datos.
  */
 app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
     try {
         const API_KEY = process.env.GNEWS_API_KEY;
         const urlGNews = `https://gnews.io/api/v4/top-headlines?category=general&lang=es&country=py&max=10&apikey=${API_KEY}`;
         
-        // 1. Llama a GNews
         const response = await axios.get(urlGNews);
         const gnewsArticles = response.data.articles;
-
         let nuevosArticulosGuardados = 0;
 
-        // 2. Prepara las operaciones para guardar en MongoDB
-        // Usamos "updateOne" con "upsert" para evitar duplicados
         const operations = gnewsArticles.map(article => {
             return Article.updateOne(
-                { enlaceOriginal: article.url }, // El filtro: busca si ya existe un artículo con esta URL
+                { enlaceOriginal: article.url },
                 {
-                    $set: { // Los datos: qué guardar o actualizar
+                    $set: {
                         titulo: article.title,
                         descripcion: article.description,
                         imagen: article.image,
-                        categoria: 'noticias.lat', // ¡La categoría que queremos!
+                        categoria: 'noticias.lat',
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
                         fecha: new Date(article.publishedAt)
                     }
                 },
-                { upsert: true } // ¡La magia! Si no existe, lo crea (inserta). Si existe, lo actualiza.
+                { upsert: true }
             );
         });
 
-        // 3. Ejecuta todas las operaciones en paralelo
         const results = await Promise.all(operations);
-
-        // Contamos cuántos artículos fueron realmente *nuevos*
         results.forEach(r => {
             if (r.upsertedCount > 0) {
                 nuevosArticulosGuardados++;
@@ -147,7 +168,6 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
             articulosRecibidos: gnewsArticles.length,
             nuevosArticulosGuardados: nuevosArticulosGuardados
         });
-
     } catch (error) {
         console.error("Error en /api/sync-gnews:", error.message);
         res.status(500).json({ error: "Error al sincronizar con GNews." });
@@ -160,17 +180,11 @@ app.post('/api/sync-gnews', requireAdminKey, async (req, res) => {
  */
 app.post('/api/articles', requireAdminKey, async (req, res) => {
     try {
-        const { titulo, descripcion, imagen, categoria, fuente, enlaceOriginal, fecha } = req.body;
-        const newArticle = new Article({
-            titulo, descripcion, imagen, categoria,
-            fuente: fuente || 'Fuente desconocida',
-            enlaceOriginal: enlaceOriginal || '#',
-            fecha: fecha ? new Date(fecha) : new Date()
-        });
+        const newArticle = new Article(req.body);
         await newArticle.save();
         res.status(201).json(newArticle);
     } catch (error) {
-        if (error.code === 11000) { // Error de duplicado
+        if (error.code === 11000) {
              return res.status(409).json({ error: "Error: Ya existe un artículo con ese enlace original." });
         }
         res.status(500).json({ error: "Error al guardar el artículo." });
@@ -181,5 +195,5 @@ app.post('/api/articles', requireAdminKey, async (req, res) => {
 // INICIAR SERVIDOR
 // =============================================
 app.listen(PORT, () => {
-    console.log(`🚀 API Central LFAF Tech (v2.0) corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 API Central LFAF Tech (v2.1) corriendo en http://localhost:${PORT}`);
 });
