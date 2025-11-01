@@ -10,12 +10,13 @@ const DEEPSEEK_API_KEYS = [
     process.env.DEEPSEEK_API_KEY_5,
 ].filter(Boolean);
 
-// --- SOLO USAREMOS GNEWS ---
+// --- ¡NUEVAS CLAVES DE API! ---
 const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
+const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY; // ¡Usamos la clave correcta!
 
-// --- ¡NUEVO! PEDIREMOS 100 ARTÍCULOS ---
-const MAX_ARTICLES_GNEWS = 100;
-
+// --- Lista de países de LATAM que soporta NewsData.io ---
+const PAISES_LATAM = "ar,bo,br,cl,co,cr,cu,ec,sv,gt,hn,mx,ni,pa,py,pe,do,uy,ve";
+// (Faltan Haití (ht) y otros, pero esta es la cobertura principal en español/portugués)
 
 /**
  * Llama a la API de DeepSeek.
@@ -59,11 +60,11 @@ async function getAIArticle(articleUrl, apiKey) {
 }
 
 /**
- * --- ¡VERSIÓN 2.0 MEJORADA! ---
- * Función "inteligente" para detectar el país.
- * AHORA ACEPTA EL TEXTO DE LA IA PARA UNA SEGUNDA REVISIÓN.
+ * --- ¡NUEVO! ---
+ * Función "inteligente" para detectar el país (SOLO PARA GNEWS).
+ * NewsData.io ya nos da el país.
  */
-function detectarPais(sourceName, url, iaText = '') {
+function detectarPaisGNews(sourceName, url, iaText = '') {
     const textoCompleto = `${sourceName} ${url} ${iaText}`.toLowerCase();
 
     // Países por URL (más preciso)
@@ -81,7 +82,7 @@ function detectarPais(sourceName, url, iaText = '') {
     if (textoCompleto.includes('.cu')) return 'cu';
     if (textoCompleto.includes('.br')) return 'br';
 
-    // Países por nombre de fuente o texto de IA (menos preciso)
+    // Países por nombre de fuente o texto de IA
     if (textoCompleto.includes('paraguay')) return 'py';
     if (textoCompleto.includes('chile')) return 'cl';
     if (textoCompleto.includes('perú') || textoCompleto.includes('peru')) return 'pe';
@@ -95,71 +96,84 @@ function detectarPais(sourceName, url, iaText = '') {
     if (textoCompleto.includes('venezuela')) return 've';
     if (textoCompleto.includes('cuba')) return 'cu';
     if (textoCompleto.includes('brasil')) return 'br';
-    
-    // Fuentes conocidas
-    if (textoCompleto.includes('abc color') || textoCompleto.includes('última hora')) return 'py';
-    if (textoCompleto.includes('latercera') || textoCompleto.includes('biobiochile')) return 'cl';
-    if (textoCompleto.includes('elcomercio.pe') || textoCompleto.includes('rpp') || textoCompleto.includes('larepublica.pe')) return 'pe';
-    if (textoCompleto.includes('clarin') || textoCompleto.includes('la nacion')) return 'ar';
-    if (textoCompleto.includes('eltiempo.com') || textoCompleto.includes('elespectador.com')) return 'co';
-    if (textoCompleto.includes('eluniversal.com.mx') || textoCompleto.includes('reforma')) return 'mx';
 
     return null; // No se pudo detectar
 }
 
 
 /**
- * [PRIVADO] Sincronizar GNews con nuestra Base de Datos
- * * --- ¡VERSIÓN GNEWS-ONLY MEJORADA! ---
+ * [PRIVADO] Sincronizar Noticias
+ * * --- ¡VERSIÓN NEWSDATA.IO + GNEWS INTELIGENTE! ---
  */
 exports.syncGNews = async (req, res) => {
     if (DEEPSEEK_API_KEYS.length === 0) {
         return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
     }
-    if (!API_KEY_GNEWS) {
-        return res.status(500).json({ error: "Falta GNEWS_API_KEY en el .env" });
+    if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
+        return res.status(500).json({ error: "Faltan GNEWS_API_KEY o NEWSDATA_API_KEY en el .env" });
     }
-    console.log(`Iniciando sync GNEWS-ONLY con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
+    console.log(`Iniciando sync HÍBRIDO (NewsData.io + GNews) con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
     let erroresFetch = [];
     let articulosParaIA = [];
+    let totalObtenidosNewsData = 0;
     let totalObtenidosGNews = 0;
-    let detectadosPaso1 = 0;
-    let detectadosPaso2 = 0;
+    let detectadosGNews = 0;
 
     try {
-        // --- PASO 1: Obtener artículos de GNews (Noticias Generales) ---
-        console.log(`Paso 1: Obteniendo noticias de GNews (General) | Max: ${MAX_ARTICLES_GNEWS}...`);
+        // --- PASO 1: Obtener artículos de NewsData.io (Noticias Locales de LATAM) ---
+        console.log(`Paso 1: Obteniendo noticias de NewsData.io para ${PAISES_LATAM}...`);
         try {
-            const urlGNews = `https://gnews.io/api/v4/top-headlines?category=general&lang=es&max=${MAX_ARTICLES_GNEWS}&apikey=${API_KEY_GNEWS}`;
+            // ¡Hacemos 1 sola llamada para todos los países de Latam!
+            const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${PAISES_LATAM}&language=es,pt`;
+            const response = await axios.get(urlNewsData);
+            
+            // Normalizamos la respuesta de NewsData.io
+            response.data.results.forEach(article => {
+                articulosParaIA.push({
+                    title: article.title,
+                    description: article.description || 'Sin descripción.',
+                    content: article.content || article.description,
+                    image: article.image_url,
+                    source: { name: article.source_id || 'Fuente Desconocida' },
+                    url: article.link,
+                    publishedAt: article.pubDate,
+                    categoriaLocal: 'general',
+                    paisLocal: article.country[0] // ¡El país ya viene! (ej: 'py')
+                });
+            });
+            totalObtenidosNewsData = response.data.results.length;
+            console.log(`-> Obtenidos ${totalObtenidosNewsData} artículos de NewsData.io (clasificados).`);
+
+        } catch (newsDataError) {
+            console.error(`Error al llamar a NewsData.io: ${newsDataError.message}`);
+            erroresFetch.push(`NewsData.io (${newsDataError.response?.status})`);
+        }
+
+        // --- PASO 2: Obtener artículos de GNews (Noticias Generales de LATAM) ---
+        console.log("Paso 2: Obteniendo noticias de GNews (Temas LATAM)...");
+        try {
+            const queryLatam = encodeURIComponent('"Mercosur" OR "Copa Libertadores" OR "LATAM" OR "Comunidad Andina" OR "OEA"');
+            const urlGNews = `https://gnews.io/api/v4/search?q=${queryLatam}&lang=es&max=50&apikey=${API_KEY_GNEWS}`;
             const response = await axios.get(urlGNews);
             
             response.data.articles.forEach(article => {
                 articulosParaIA.push({ 
                     ...article, 
                     categoriaLocal: 'general',
-                    paisLocal: null 
+                    paisLocal: null // Aún no sabemos el país
                 });
             });
             totalObtenidosGNews = response.data.articles.length;
-            console.log(`-> Obtenidos ${totalObtenidosGNews} artículos de GNews.`);
+            console.log(`-> Obtenidos ${totalObtenidosGNews} artículos de GNews (para clasificar).`);
             
         } catch (gnewsError) {
             console.error(`Error al llamar a GNews: ${gnewsError.message}`);
             erroresFetch.push('GNews-general');
-            return res.status(500).json({ error: "Error al llamar a GNews." });
         }
 
-        // --- PASO 2: Lógica "Inteligente" de Detección de País (Paso 1) ---
-        console.log("Paso 2: Detección de país (Por Fuente/URL)...");
-        articulosParaIA.forEach(article => {
-            const paisDetectado = detectarPais(article.source.name, article.url);
-            if (paisDetectado) {
-                article.paisLocal = paisDetectado;
-                detectadosPaso1++;
-            }
-        });
-        console.log(`-> ${detectadosPaso1} artículos clasificados por fuente/URL.`);
+        console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos para procesar.`);
+
 
         // --- PASO 3: Generación de IA (Paralelo) ---
         console.log(`Paso 3: Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
@@ -177,18 +191,19 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> ${articulosValidosIA.length} artículos procesados por IA.`);
 
 
-        // --- PASO 4: ¡NUEVO! Detección de País (Paso 2, con IA) ---
-        console.log("Paso 4: Re-detección de país (Usando texto de IA)...");
+        // --- PASO 4: Detección de País (Solo para los de GNews) ---
+        console.log("Paso 4: Clasificando país para artículos de GNews (Usando IA)...");
         articulosValidosIA.forEach(article => {
-            if (!article.paisLocal) { // Si sigue siendo null
-                const paisDetectadoIA = detectarPais(article.source.name, article.url, article.articuloGenerado);
+            // Si el país es 'null' (vino de GNews) Y no es de Brasil (GNews no trae 'pt')
+            if (!article.paisLocal && !article.url.includes('.br')) {
+                const paisDetectadoIA = detectarPaisGNews(article.source.name, article.url, article.articuloGenerado);
                 if (paisDetectadoIA) {
                     article.paisLocal = paisDetectadoIA;
-                    detectadosPaso2++;
+                    detectadosGNews++;
                 }
             }
         });
-        console.log(`-> ${detectadosPaso2} artículos adicionales clasificados por IA.`);
+        console.log(`-> ${detectadosGNews} artículos de GNews fueron clasificados por IA.`);
 
 
         // --- PASO 5: Preparar la escritura en la Base de Datos ---
@@ -225,34 +240,35 @@ exports.syncGNews = async (req, res) => {
             totalArticulosActualizados = result.modifiedCount;
         }
 
-        console.log("¡Sincronización GNEWS-ONLY completada!");
-        
-        const totalClasificados = detectadosPaso1 + detectadosPaso2;
+        console.log("¡Sincronización HÍBRIDA (NewsData+GNews) completada!");
         
         // --- PASO 7: Respuesta con Reporte Detallado ---
         res.json({ 
-            message: "Sincronización GNEWS-ONLY completada.",
+            message: "Sincronización HÍBRIDA completada.",
             reporte: {
+                totalObtenidosNewsData: totalObtenidosNewsData,
                 totalObtenidosGNews: totalObtenidosGNews,
+                totalArticulos: articulosParaIA.length,
                 totalProcesadosIA: articulosValidosIA.length,
-                totalFallidosIA: totalObtenidosGNews - articulosValidosIA.length,
-                clasificadosPorFuente: detectadosPaso1,
-                clasificadosPorIA: detectadosPaso2,
-                totalClasificados: totalClasificados,
-                totalSinClasificar: articulosValidosIA.length - totalClasificados,
+                totalFallidosIA: articulosParaIA.length - articulosValidosIA.length,
+                clasificadosPorNewsData: totalObtenidosNewsData,
+                clasificadosPorGNewsIA: detectadosGNews,
+                totalClasificados: totalObtenidosNewsData + detectadosGNews,
+                totalSinClasificar: articulosValidosIA.length - (totalObtenidosNewsData + detectadosGNews),
                 nuevosArticulosGuardados: totalArticulosNuevos,
-                articulosActualizados: totalArticulosActualizados
+                articulosActualizados: totalArticulosActualizados,
+                apisConError: erroresFetch
             }
         });
 
     } catch (error) {
-        console.error("Error catastrófico en syncGNews (GNews-Only):", error.message);
-        res.status(500).json({ error: "Error al sincronizar (GNews-Only)." });
+        console.error("Error catastrófico en syncGNews (Híbrido):", error.message);
+        res.status(500).json({ error: "Error al sincronizar (Híbrido)." });
     }
 };
 
 /**
- * [PRIVADO] Añadir un nuevo artículo manualmente
+ * [PRIVADO] Añadir un nuevo artículo manually
  * (Sin cambios)
  */
 exports.createManualArticle = async (req, res) => {
