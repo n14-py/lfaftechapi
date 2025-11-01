@@ -6,8 +6,7 @@ const ArticleSchema = new mongoose.Schema({
     descripcion: { type: String, required: true },
     imagen: { type: String, required: true },
     
-    // El "relleno" que GNews nos da
-    contenido: { type: String }, 
+    // 'contenido' SE HA ELIMINADO PARA AHORRAR ESPACIO
     
     // 'categoria' será "general", "deportes", "tecnologia", etc.
     categoria: { type: String, required: true, index: true }, 
@@ -15,12 +14,9 @@ const ArticleSchema = new mongoose.Schema({
     // 'sitio' será "noticias.lat", "pelis.lat", etc.
     sitio: { type: String, required: true, index: true }, 
 
-    // --- ¡NUEVO CAMPO PARA PAÍSES! ---
-    // (sparse:true significa que no es obligatorio, 
-    // ya que las noticias de "General" no tendrán país)
+    // 'pais' (ej. 'py', 'cl', 'ar', o null si es regional)
     pais: { type: String, index: true, sparse: true },
-    // ---------------------------------
-
+    
     // El artículo largo generado por la IA
     articuloGenerado: { type: String },
 
@@ -29,8 +25,7 @@ const ArticleSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// --- ¡NUEVO! ÍNDICE DE TEXTO PARA BÚSQUEDA (Necesario para la nueva función de búsqueda) ---
-// Crea un índice que permite buscar rápidamente por título y descripción.
+// --- ¡NUEVO! ÍNDICE DE TEXTO PARA BÚSQUEDA ---
 ArticleSchema.index({ titulo: 'text', descripcion: 'text' });
 // ---------------------------------------------
 

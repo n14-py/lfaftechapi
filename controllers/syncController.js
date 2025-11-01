@@ -14,17 +14,17 @@ const DEEPSEEK_API_KEYS = [
 const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
 const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY; // ¡Esta es la clave pub_... de tu imagen!
 
-// --- ¡NUEVO! LÍMITES DE API AUMENTADOS ---
-const MAX_ARTICLES_GNEWS = 50; // Pedimos 50 noticias regionales
-const NEWSDATA_PAGE_SIZE = 10; // NewsData gratis da 10 por país
+// --- LÍMITES DE API ---
+const MAX_ARTICLES_GNEWS = 50; // 50 noticias regionales
+const NEWSDATA_PAGE_SIZE = 10; // 10 noticias por país (límite plan gratuito NewsData)
 
-// --- ¡NUEVO! Lista de países de LATAM separada en "chunks" de 5 ---
-// (Límite del plan gratuito de NewsData.io)
-const PAISES_LATAM_CHUNKS = [
-    "ar,bo,br,cl,co", // Chunk 1
-    "cr,cu,ec,sv,gt", // Chunk 2
-    "hn,mx,ni,pa,py", // Chunk 3 (¡Incluye Paraguay!)
-    "pe,do,uy,ve"     // Chunk 4
+// --- ¡NUEVO! Lista de 19 países de LATAM separada en "lotes" de 5 ---
+// (Límite del plan gratuito de NewsData.io es 5 países por llamada)
+const PAISES_LATAM_LOTES = [
+    "ar,bo,br,cl,co", // Lote 1
+    "cr,cu,ec,sv,gt", // Lote 2
+    "hn,mx,ni,pa,py", // Lote 3 (¡Incluye Paraguay!)
+    "pe,do,uy,ve"     // Lote 4 (Haití 'ht' no está soportado por la API)
 ];
 
 
@@ -76,7 +76,6 @@ async function getAIArticle(articleUrl, apiKey) {
 function detectarPaisGNews(sourceName, url, iaText = '') {
     const textoCompleto = `${sourceName} ${url} ${iaText}`.toLowerCase();
     
-    // Lista de países y sus identificadores
     const paisesMap = {
         'py': ['.py', 'paraguay', 'abc color', 'última hora'],
         'cl': ['.cl', 'chile', 'latercera', 'biobiochile'],
@@ -106,7 +105,7 @@ function detectarPaisGNews(sourceName, url, iaText = '') {
 
 /**
  * [PRIVADO] Sincronizar Noticias
- * * --- ¡VERSIÓN NEWSDATA.IO (LOOP) + GNEWS INTELIGENTE! ---
+ * * --- ¡VERSIÓN DE ALTO VOLUMEN! (NewsData.io Bucle + GNews Regional) ---
  */
 exports.syncGNews = async (req, res) => {
     if (DEEPSEEK_API_KEYS.length === 0) {
@@ -115,7 +114,7 @@ exports.syncGNews = async (req, res) => {
     if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
         return res.status(500).json({ error: "Faltan GNEWS_API_KEY o NEWSDATA_API_KEY en el .env" });
     }
-    console.log(`Iniciando sync HÍBRIDO (NewsData.io + GNews) con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
+    console.log(`Iniciando sync de ALTO VOLUMEN con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
     let erroresFetch = [];
     let articulosParaIA = [];
@@ -124,12 +123,13 @@ exports.syncGNews = async (req, res) => {
     let detectadosGNews = 0;
 
     try {
-        // --- PASO 1: Obtener artículos de NewsData.io (Noticias Locales de LATAM) ---
-        console.log(`Paso 1: Obteniendo noticias de NewsData.io en ${PAISES_LATAM_CHUNKS.length} lotes...`);
+        // --- PASO 1: NEWSDATA.IO (Bucle de 4 llamadas para 19 países) ---
+        console.log(`Paso 1: Obteniendo noticias de NewsData.io en ${PAISES_LATAM_LOTES.length} lotes...`);
         
-        for (const chunk of PAISES_LATAM_CHUNKS) {
+        for (const lote of PAISES_LATAM_LOTES) {
             try {
-                const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${chunk}&language=es,pt&size=${NEWSDATA_PAGE_SIZE}`;
+                // Pedimos 10 noticias (size=10) por cada país en el lote
+                const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${lote}&language=es,pt&size=${NEWSDATA_PAGE_SIZE}`;
                 const response = await axios.get(urlNewsData);
                 
                 if (response.data.results) {
@@ -137,7 +137,7 @@ exports.syncGNews = async (req, res) => {
                         articulosParaIA.push({
                             title: article.title,
                             description: article.description || 'Sin descripción.',
-                            content: article.content || article.description,
+                            // 'content' ya no se usa
                             image: article.image_url,
                             source: { name: article.source_id || 'Fuente Desconocida' },
                             url: article.link,
@@ -148,17 +148,17 @@ exports.syncGNews = async (req, res) => {
                     });
                     const count = response.data.results.length;
                     totalObtenidosNewsData += count;
-                    console.log(`-> Lote [${chunk}] exitoso. Obtenidos ${count} artículos.`);
+                    console.log(`-> Lote [${lote}] exitoso. Obtenidos ${count} artículos.`);
                 }
             } catch (newsDataError) {
-                console.error(`Error al llamar a NewsData.io para [${chunk}]: ${newsDataError.message}`);
-                erroresFetch.push(`NewsData.io-${chunk} (${newsDataError.response?.status})`);
+                console.error(`Error al llamar a NewsData.io para [${lote}]: ${newsDataError.message}`);
+                erroresFetch.push(`NewsData.io-${lote} (${newsDataError.response?.status})`);
             }
         }
         console.log(`-> Total Obtenidos NewsData.io: ${totalObtenidosNewsData} (clasificados).`);
 
 
-        // --- PASO 2: Obtener artículos de GNews (Noticias Generales de LATAM) ---
+        // --- PASO 2: GNEWS (1 llamada para noticias regionales) ---
         console.log(`Paso 2: Obteniendo noticias de GNews (Temas LATAM) | Max: ${MAX_ARTICLES_GNEWS}...`);
         try {
             const queryLatam = encodeURIComponent('"Mercosur" OR "Copa Libertadores" OR "LATAM" OR "Comunidad Andina" OR "OEA"');
@@ -167,7 +167,7 @@ exports.syncGNews = async (req, res) => {
             
             response.data.articles.forEach(article => {
                 articulosParaIA.push({ 
-                    ...article, 
+                    ...article, // GNews nos da: title, description, url, image, source, publishedAt
                     categoriaLocal: 'general',
                     paisLocal: null // Aún no sabemos el país
                 });
@@ -183,14 +183,14 @@ exports.syncGNews = async (req, res) => {
         console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos para procesar.`);
 
 
-        // --- PASO 3: Generación de IA (Paralelo) ---
+        // --- PASO 3: IA (Procesa CIENTOS de artículos) ---
         console.log(`Paso 3: Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
             return getAIArticle(article.url, apiKeyParaUsar)
                 .then(resultadoIA => {
-                    return { ...article, ...resultadoIA };
+                    return { ...article, ...resultadoIA }; // Combina GNews/NewsData + IA
                 });
         });
 
@@ -199,7 +199,7 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> ${articulosValidosIA.length} artículos procesados por IA.`);
 
 
-        // --- PASO 4: Detección de País (Solo para los de GNews) ---
+        // --- PASO 4: CLASIFICACIÓN (Solo para los de GNews) ---
         console.log("Paso 4: Clasificando país para artículos de GNews (Usando IA)...");
         articulosValidosIA.forEach(article => {
             if (!article.paisLocal && !article.url.includes('.br')) { // Si es null (vino de GNews)
@@ -213,7 +213,7 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> ${detectadosGNews} artículos de GNews fueron clasificados por IA.`);
 
 
-        // --- PASO 5: Preparar la escritura en la Base de Datos ---
+        // --- PASO 5: Base de Datos (Con optimización) ---
         const operations = articulosValidosIA.map(article => ({
             updateOne: {
                 filter: { enlaceOriginal: article.url }, 
@@ -221,7 +221,7 @@ exports.syncGNews = async (req, res) => {
                     $set: {
                         titulo: article.title,
                         descripcion: article.description,
-                        contenido: article.content,
+                        // ¡OPTIMIZADO! El campo 'contenido' ya no se guarda.
                         imagen: article.image,
                         sitio: 'noticias.lat',
                         categoria: article.categoriaLocal, 
@@ -229,14 +229,14 @@ exports.syncGNews = async (req, res) => {
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
                         fecha: new Date(article.publishedAt),
-                        articuloGenerado: article.articuloGenerado
+                        articuloGenerado: article.articuloGenerado // Solo guardamos este
                     }
                 },
                 upsert: true 
             }
         }));
 
-        // --- PASO 6: Guardar todo en la Base de Datos ---
+        // --- PASO 6: Guardar ---
         let totalArticulosNuevos = 0;
         let totalArticulosActualizados = 0;
         
@@ -247,12 +247,12 @@ exports.syncGNews = async (req, res) => {
             totalArticulosActualizados = result.modifiedCount;
         }
 
-        console.log("¡Sincronización HÍBRIDA (NewsData+GNews) completada!");
+        console.log("¡Sincronización de ALTO VOLUMEN completada!");
         
-        // --- PASO 7: Respuesta con Reporte Detallado ---
+        // --- PASO 7: Respuesta (Reporte Detallado) ---
         const totalClasificados = totalObtenidosNewsData + detectadosGNews;
         res.json({ 
-            message: "Sincronización HÍBRIDA completada.",
+            message: "Sincronización de ALTO VOLUMEN completada.",
             reporte: {
                 totalObtenidosNewsData: totalObtenidosNewsData,
                 totalObtenidosGNews: totalObtenidosGNews,
@@ -270,14 +270,14 @@ exports.syncGNews = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error catastrófico en syncGNews (Híbrido):", error.message);
-        res.status(500).json({ error: "Error al sincronizar (Híbrido)." });
+        console.error("Error catastrófico en syncGNews (Alto Volumen):", error.message);
+        res.status(500).json({ error: "Error al sincronizar (Alto Volumen)." });
     }
 };
 
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente
- * (Sin cambios)
+ * (Actualizado con la optimización de BD)
  */
 exports.createManualArticle = async (req, res) => {
     try {
@@ -289,7 +289,7 @@ exports.createManualArticle = async (req, res) => {
 
         const newArticle = new Article({
             titulo, descripcion, imagen, categoria, sitio,
-            contenido: contenido || descripcion,
+            // ¡OPTIMIZADO! 'contenido' ya no se guarda
             fuente: fuente || 'Fuente desconocida',
             enlaceOriginal: enlaceOriginal || '#',
             fecha: fecha ? new Date(fecha) : new Date(),
