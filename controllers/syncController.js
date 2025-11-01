@@ -18,13 +18,10 @@ const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY; // ¡Esta es la clave pub
 const MAX_ARTICLES_GNEWS = 50; // 50 noticias regionales
 const NEWSDATA_PAGE_SIZE = 10; // 10 noticias por país (límite plan gratuito NewsData)
 
-// --- ¡NUEVO! Lista de 19 países de LATAM separada en "lotes" de 5 ---
-// (Límite del plan gratuito de NewsData.io es 5 países por llamada)
-const PAISES_LATAM_LOTES = [
-    "ar,bo,br,cl,co", // Lote 1
-    "cr,cu,ec,sv,gt", // Lote 2
-    "hn,mx,ni,pa,py", // Lote 3 (¡Incluye Paraguay!)
-    "pe,do,uy,ve"     // Lote 4 (Haití 'ht' no está soportado por la API)
+// --- ¡NUEVO! Lista de 19 países de LATAM para el bucle ---
+const PAISES_LATAM = [
+    "ar", "bo", "br", "cl", "co", "cr", "cu", "ec", "sv", 
+    "gt", "hn", "mx", "ni", "pa", "py", "pe", "do", "uy", "ve"
 ];
 
 
@@ -123,13 +120,14 @@ exports.syncGNews = async (req, res) => {
     let detectadosGNews = 0;
 
     try {
-        // --- PASO 1: NEWSDATA.IO (Bucle de 4 llamadas para 19 países) ---
-        console.log(`Paso 1: Obteniendo noticias de NewsData.io en ${PAISES_LATAM_LOTES.length} lotes...`);
+        // --- PASO 1: NEWSDATA.IO (Bucle de 19 llamadas para 19 países) ---
+        console.log(`Paso 1: Obteniendo noticias de NewsData.io en ${PAISES_LATAM.length} llamadas...`);
         
-        for (const lote of PAISES_LATAM_LOTES) {
+        // ¡ESTE BUCLE "for" HACE 19 LLAMADAS, 1 POR PAÍS!
+        for (const pais of PAISES_LATAM) {
             try {
-                // Pedimos 10 noticias (size=10) por cada país en el lote
-                const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${lote}&language=es,pt&size=${NEWSDATA_PAGE_SIZE}`;
+                // Pedimos 10 noticias (size=10) de CADA país
+                const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${pais}&language=es,pt&size=${NEWSDATA_PAGE_SIZE}`;
                 const response = await axios.get(urlNewsData);
                 
                 if (response.data.results) {
@@ -148,11 +146,11 @@ exports.syncGNews = async (req, res) => {
                     });
                     const count = response.data.results.length;
                     totalObtenidosNewsData += count;
-                    console.log(`-> Lote [${lote}] exitoso. Obtenidos ${count} artículos.`);
+                    console.log(`-> Llamada [${pais}] exitosa. Obtenidos ${count} artículos.`);
                 }
             } catch (newsDataError) {
-                console.error(`Error al llamar a NewsData.io para [${lote}]: ${newsDataError.message}`);
-                erroresFetch.push(`NewsData.io-${lote} (${newsDataError.response?.status})`);
+                console.error(`Error al llamar a NewsData.io para [${pais}]: ${newsDataError.message}`);
+                erroresFetch.push(`NewsData.io-${pais} (${newsDataError.response?.status})`);
             }
         }
         console.log(`-> Total Obtenidos NewsData.io: ${totalObtenidosNewsData} (clasificados).`);

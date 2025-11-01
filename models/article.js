@@ -25,7 +25,7 @@ const ArticleSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// --- ¡NUEVO! ÍNDICE DE TEXTO PARA BÚSQUEDA ---
+// --- ÍNDICE DE TEXTO PARA BÚSQUEDA ---
 ArticleSchema.index({ titulo: 'text', descripcion: 'text' });
 // ---------------------------------------------
 
