@@ -4,11 +4,10 @@ const Article = require('../models/article'); // Importamos el "molde"
 /**
  * [PÚBLICO] Obtener LISTA de artículos
  * (Lógica de la ruta GET /api/articles)
- * --- ¡ACTUALIZADO CON FILTRO DE PAÍS Y BÚSQUEDA! ---
+ * --- ¡ACTUALIZADO CON NUEVA LÓGICA DE FILTRADO! ---
  */
 exports.getArticles = async (req, res) => {
     try {
-        // ¡Ahora también leemos 'query' para la búsqueda!
         const { sitio, categoria, limite, pagina, pais, query } = req.query;
         
         if (!sitio) {
@@ -21,31 +20,34 @@ exports.getArticles = async (req, res) => {
         
         // Definiciones base
         let filtro = { sitio: sitio };
-        let sort = { fecha: -1 }; // Ordenar por fecha por defecto
-        let projection = {};      // Para el score de búsqueda (relevancia)
+        let sort = { fecha: -1 }; 
+        let projection = {};      
 
-        // --- LÓGICA DE FILTRO PRINCIPAL (Búsqueda vs. Categoría/País) ---
+        // --- LÓGICA DE FILTRO PRINCIPAL (Búsqueda vs. País vs. Categoría) ---
+        
         if (query) {
-            // 1. LÓGICA DE BÚSQUEDA POR TEXTO (Global)
+            // 1. LÓGICA DE BÚSQUEDA POR TEXTO (Prioridad Máxima)
             filtro.$text = { $search: query };
-            sort = { score: { $meta: "textScore" } }; // Ordenar por relevancia
-            projection = { score: { $meta: "textScore" } }; // Necesario para ordenar
+            sort = { score: { $meta: "textScore" } }; 
+            projection = { score: { $meta: "textScore" } }; 
             
         } else if (pais) {
-            // 2. LÓGICA DE FILTRO POR PAÍS (Existente)
+            // 2. LÓGICA DE FILTRO POR PAÍS
             filtro.pais = pais;
-        } else {
-            // 3. LÓGICA DE FILTRO POR CATEGORÍA (Existente)
-            // Nos aseguramos de que sean noticias SIN país (las generales).
-            filtro.pais = { $in: [null, undefined] };
             
-            if (categoria && categoria !== 'todos') {
-                filtro.categoria = categoria;
-            }
+        } else if (categoria && categoria !== 'todos') {
+            // 3. LÓGICA DE FILTRO POR CATEGORÍA (si no es 'todos')
+            // (Si en el futuro añades 'deportes', 'tecnologia', esta lógica funcionará)
+            filtro.categoria = categoria;
+            
+        } else {
+            // 4. LÓGICA POR DEFECTO (categoria='todos' o 'general')
+            // Simplemente no aplica filtro de país o categoría,
+            // mostrando todo lo del 'sitio', ordenado por fecha.
+            // (Esta es la corrección clave. Ya no filtramos por pais=null)
         }
         // --- FIN DE LA LÓGICA ---
 
-        // Ejecutamos la consulta, aplicando el filtro, proyección (score), orden y paginación
         const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
 
@@ -63,7 +65,7 @@ exports.getArticles = async (req, res) => {
 
 /**
  * [PÚBLICO] Obtener UN solo artículo por su ID
- * (Lógica de la ruta GET /api/article/:id)
+ * (Sin cambios)
  */
 exports.getArticleById = async (req, res) => {
     try {
@@ -85,7 +87,7 @@ exports.getArticleById = async (req, res) => {
 
 /**
  * [PÚBLICO] Obtener artículos RECOMENDADOS
- * (Lógica de la ruta GET /api/articles/recommended)
+ * (Sin cambios)
  */
 exports.getRecommendedArticles = async (req, res) => {
     try {
@@ -97,7 +99,7 @@ exports.getRecommendedArticles = async (req, res) => {
         let filtro = { 
             sitio: sitio, 
             categoria: categoria,
-            _id: { $ne: excludeId } // Excluir el artículo que ya se está viendo
+            _id: { $ne: excludeId } 
         };
 
         const randomSkip = Math.floor(Math.random() * 20);
@@ -105,7 +107,7 @@ exports.getRecommendedArticles = async (req, res) => {
         const recommended = await Article.find(filtro)
             .sort({ fecha: -1 })
             .skip(randomSkip)
-            .limit(4); // Trae 4 recomendados
+            .limit(4); 
 
         res.json(recommended);
 
