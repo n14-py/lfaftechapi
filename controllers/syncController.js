@@ -17,28 +17,35 @@ const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY;
 // --- LÍMITES DE API (10 por país) ---
 const MAX_ARTICLES_PER_COUNTRY = 10; 
 
-// --- Lista de 19 países de LATAM para NEWSDATA.IO ---
+// --- ¡NUEVO! MAPA DE TRADUCCIÓN DE NEWSDATA.IO ---
+// (Traduce "argentina" a "ar")
+const paisNewsDataMap = {
+    "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
+    "colombia": "co", "costa rica": "cr", "cuba": "cu", "ecuador": "ec", 
+    "el salvador": "sv", "guatemala": "gt", "honduras": "hn", "mexico": "mx", 
+    "nicaragua": "ni", "panama": "pa", "paraguay": "py", "peru": "pe", 
+    "dominican republic": "do", "uruguay": "uy", "venezuela": "ve"
+};
+
+// --- Lista de 19 países de LATAM para NEWSDATA.IO (usa los códigos de 2 letras) ---
 const PAISES_NEWSDATA = [
     "ar", "bo", "br", "cl", "co", "cr", "cu", "ec", "sv", 
     "gt", "hn", "mx", "ni", "pa", "py", "pe", "do", "uy", "ve"
 ];
 
-// --- Lista de 10 países de LATAM para GNEWS (los que mejor cobertura tienen) ---
+// --- Lista de 10 países de LATAM para GNEWS ---
 const PAISES_GNEWS = [
     "ar", "br", "cl", "co", "ec", "mx", "pe", "py", "uy", "ve"
 ];
 
-// --- ¡NUEVO! Función para esperar (evita el error 429) ---
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
 
 /**
  * Llama a la API de DeepSeek.
+ * (Sin cambios)
  */
 async function getAIArticle(articleUrl, apiKey) {
-    if (!articleUrl || !articleUrl.startsWith('http')) {
-        return null;
-    }
+    if (!articleUrl || !articleUrl.startsWith('http')) return null;
     if (!apiKey) {
         console.error("Error: No se proporcionó una API key de DeepSeek.");
         return null;
@@ -52,10 +59,7 @@ async function getAIArticle(articleUrl, apiKey) {
     const userPrompt = `Por favor, actúa como reportero de Noticias.lat y escribe un artículo de noticias completo y extenso (idealmente más de 700 palabras) basado en la siguiente URL. Analiza el contenido de este enlace y redáctalo desde cero: ${articleUrl}`;
     const body = {
         model: "deepseek-chat",
-        messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-        ]
+        messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ]
     };
     try {
         const response = await axios.post(API_URL, body, { headers });
@@ -72,13 +76,11 @@ async function getAIArticle(articleUrl, apiKey) {
     }
 }
 
-
 /**
  * [PRIVADO] Sincronizar Noticias
- * * --- ¡VERSIÓN DOBLE BUCLE (CON DELAY)! ---
+ * * --- ¡VERSIÓN DOBLE BUCLE (CON TRADUCCIÓN)! ---
  */
 exports.syncGNews = async (req, res) => {
-    // ---- AQUÍ EMPIEZA EL TRY PRINCIPAL ----
     try {
         if (DEEPSEEK_API_KEYS.length === 0) {
             return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
@@ -103,6 +105,10 @@ exports.syncGNews = async (req, res) => {
                 
                 if (response.data.results) {
                     response.data.results.forEach(article => {
+                        // --- ¡AQUÍ ESTÁ LA TRADUCCIÓN! ---
+                        const paisNombreCompleto = article.country[0]; // ej: "argentina"
+                        const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto; // ej: "ar"
+                        
                         articulosParaIA.push({
                             title: article.title,
                             description: article.description || 'Sin descripción.',
@@ -111,7 +117,7 @@ exports.syncGNews = async (req, res) => {
                             url: article.link,
                             publishedAt: article.pubDate,
                             categoriaLocal: 'general',
-                            paisLocal: article.country[0] 
+                            paisLocal: paisCodigo // Guardamos el código "ar"
                         });
                     });
                     const count = response.data.results.length;
@@ -122,9 +128,7 @@ exports.syncGNews = async (req, res) => {
                 console.error(`Error al llamar a NewsData.io para [${pais}]: ${newsDataError.message}`);
                 erroresFetch.push(`NewsData.io-${pais} (${newsDataError.response?.status})`);
             }
-            
-            // --- ¡ARREGLO PARA ERROR 429! ---
-            await sleep(1000); // Esperamos 1 segundo antes de la siguiente llamada
+            await sleep(1000); // Esperamos 1 segundo
         }
         console.log(`-> Total Obtenidos NewsData.io: ${totalObtenidosNewsData} (clasificados).`);
 
@@ -141,7 +145,7 @@ exports.syncGNews = async (req, res) => {
                     articulosParaIA.push({ 
                         ...article,
                         categoriaLocal: 'general',
-                        paisLocal: pais 
+                        paisLocal: pais // GNews ya nos da el código "ar"
                     });
                 });
                 const count = response.data.articles.length;
@@ -152,8 +156,6 @@ exports.syncGNews = async (req, res) => {
                 console.error(`Error al llamar a GNews para [${pais}]: ${gnewsError.message}`);
                 erroresFetch.push(`GNews-${pais}`);
             }
-            
-            // --- ¡ARREGLO PARA ERROR 429! ---
             await sleep(1000); // Esperamos 1 segundo
         }
         console.log(`-> Total Obtenidos GNews: ${totalObtenidosGNews} (clasificados).`);
@@ -161,7 +163,7 @@ exports.syncGNews = async (req, res) => {
         console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos para procesar.`);
 
 
-        // --- PASO 3: IA (Procesa CIENTOS de artículos) ---
+        // --- PASO 3: IA ---
         console.log(`Paso 3: Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
@@ -188,7 +190,7 @@ exports.syncGNews = async (req, res) => {
                         imagen: article.image,
                         sitio: 'noticias.lat',
                         categoria: article.categoriaLocal, 
-                        pais: article.paisLocal, 
+                        pais: article.paisLocal, // ¡Todos guardados como "ar", "py", etc!
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
                         fecha: new Date(article.publishedAt),
@@ -229,12 +231,11 @@ exports.syncGNews = async (req, res) => {
             }
         });
 
-    // ---- AQUÍ CIERRA EL TRY PRINCIPAL ----
     } catch (error) {
         console.error("Error catastrófico en syncGNews (Doble Bucle):", error.message);
         res.status(500).json({ error: "Error al sincronizar (Doble Bucle)." });
     }
-}; // <-- ¡ESTA ES LA LLAVE DE CIERRE QUE FALTABA!
+};
 
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente
