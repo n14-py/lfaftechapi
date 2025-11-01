@@ -10,9 +10,13 @@ const DEEPSEEK_API_KEYS = [
     process.env.DEEPSEEK_API_KEY_5,
 ].filter(Boolean);
 
-// --- ¡NUEVO! CARGAMOS LAS API KEYS DE NOTICIAS ---
+// --- CARGAMOS LAS API KEYS DE NOTICIAS ---
 const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
-const API_KEY_NEWSAPI = process.env.NEWSAPI_API_KEY; // ¡Nueva!
+const API_KEY_NEWSAPI = process.env.NEWSAPI_API_KEY;
+
+// --- ¡NUEVO! AUMENTAMOS LA CANTIDAD DE ARTÍCULOS ---
+const MAX_ARTICLES_GNEWS = 25;
+const MAX_ARTICLES_NEWSAPI = 25;
 
 
 /**
@@ -32,7 +36,7 @@ async function getAIArticle(articleUrl, apiKey) {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
     };
-    const systemPrompt = "Eres un reportero senior para el portal 'Noticias.lat'. Tu trabajo es escribir artículos de noticias completos, detallados y profesionales. No eres un asistente, eres un periodista. Escribe en un tono formal, objetivo pero atractivo. Debes generar un artículo muy extenso, con múltiples páragros. No digas 'según la fuente'. Escribe la noticia como si fuera tuya. IMPORTANTE: No uses ningún formato Markdown, como `##` para títulos o `**` para negritas. Escribe solo texto plano.";
+    const systemPrompt = "Eres un reportero senior para el portal 'Noticias.lat'. Tu trabajo es escribir artículos de noticias completos, detallados y profesionales. No eres un asistente, eres un periodista. Escribe en un tono formal, objetivo pero atractivo. Debes generar un artículo muy extenso, con múltiples párrafos. No digas 'según la fuente'. Escribe la noticia como si fuera tuya. IMPORTANTE: No uses ningún formato Markdown, como `##` para títulos o `**` para negritas. Escribe solo texto plano.";
     const userPrompt = `Por favor, actúa como reportero de Noticias.lat y escribe un artículo de noticias completo y extenso (idealmente más de 700 palabras) basado en la siguiente URL. Analiza el contenido de este enlace y redáctalo desde cero: ${articleUrl}`;
     const body = {
         model: "deepseek-chat",
@@ -57,9 +61,8 @@ async function getAIArticle(articleUrl, apiKey) {
 }
 
 /**
- * --- ¡NUEVO! ---
  * Función "inteligente" para detectar el país basado en la fuente.
- * Esto nos permite clasificar noticias de GNews que vienen sin país.
+ * (Sin cambios)
  */
 function detectarPais(sourceName, url) {
     if (!sourceName && !url) return null;
@@ -89,8 +92,7 @@ function detectarPais(sourceName, url) {
 
 /**
  * [PRIVADO] Sincronizar GNews y NewsAPI con nuestra Base de Datos
- * (Lógica de la ruta POST /api/sync-gnews)
- * * --- ¡VERSIÓN HÍBRIDA DE ALTO RENDIMIENTO! ---
+ * --- ¡VERSIÓN HÍBRIDA MEJORADA! ---
  */
 exports.syncGNews = async (req, res) => {
     if (DEEPSEEK_API_KEYS.length === 0) {
@@ -101,79 +103,88 @@ exports.syncGNews = async (req, res) => {
     }
     console.log(`Iniciando sync HÍBRIDO con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
-    const MAX_ARTICLES_PER_RUN = 25; 
     let erroresFetch = [];
     let articulosParaIA = [];
+    let totalObtenidosGNews = 0;
+    let totalObtenidosNewsAPI = 0;
 
     try {
         // --- PASO 1: Obtener artículos de GNews (Noticias Generales) ---
-        // (1 sola petición a GNews)
-        console.log("Obteniendo noticias de GNews (General)...");
+        console.log(`Obteniendo noticias de GNews (General) | Max: ${MAX_ARTICLES_GNEWS}...`);
         try {
-            const urlGNews = `https://gnews.io/api/v4/top-headlines?category=general&lang=es&max=${MAX_ARTICLES_PER_RUN}&apikey=${API_KEY_GNEWS}`;
+            const urlGNews = `https://gnews.io/api/v4/top-headlines?category=general&lang=es&max=${MAX_ARTICLES_GNEWS}&apikey=${API_KEY_GNEWS}`;
             const response = await axios.get(urlGNews);
             
             response.data.articles.forEach(article => {
                 articulosParaIA.push({ 
                     ...article, 
-                    categoriaLocal: 'general', // Todas son 'general'
-                    paisLocal: null // La IA intentará detectarlo
+                    categoriaLocal: 'general',
+                    paisLocal: null 
                 });
             });
+            // --- ¡LOG MEJORADO! ---
+            totalObtenidosGNews = response.data.articles.length;
+            console.log(`-> Obtenidos ${totalObtenidosGNews} artículos de GNews.`);
+            
         } catch (gnewsError) {
             console.error(`Error al llamar a GNews: ${gnewsError.message}`);
             erroresFetch.push('GNews-general');
         }
 
         // --- PASO 2: Obtener artículos de NewsAPI (Noticias por País) ---
-        // (Múltiples peticiones a NewsAPI, una por país)
-        
-        // ¡Importante! NewsAPI plan gratuito SOLO soporta estos países:
-        // ar, br, co, cu, mx, ve
-        // No soporta cl, pe, py, uy, bo, etc.
         const paisesNewsAPI = ['ar', 'mx', 'co', 'br', 've', 'cu'];
         
-        console.log(`Obteniendo noticias de NewsAPI para: ${paisesNewsAPI.join(', ')}...`);
+        console.log(`Obteniendo noticias de NewsAPI para: ${paisesNewsAPI.join(', ')} | Max: ${MAX_ARTICLES_NEWSAPI} c/u...`);
 
         for (const pais of paisesNewsAPI) {
             try {
-                const urlNewsAPI = `https://newsapi.org/v2/top-headlines?country=${pais}&pageSize=${MAX_ARTICLES_PER_RUN}&apiKey=${API_KEY_NEWSAPI}`;
+                const urlNewsAPI = `https://newsapi.org/v2/top-headlines?country=${pais}&pageSize=${MAX_ARTICLES_NEWSAPI}&apiKey=${API_KEY_NEWSAPI}`;
                 const response = await axios.get(urlNewsAPI);
 
-                // ¡Normalizamos la respuesta de NewsAPI!
                 response.data.articles.forEach(article => {
                     articulosParaIA.push({
                         title: article.title,
                         description: article.description || 'Sin descripción.',
                         content: article.content || article.description,
                         image: article.urlToImage,
-                        source: { name: article.source.name }, // Normalizado
+                        source: { name: article.source.name }, 
                         url: article.url,
                         publishedAt: article.publishedAt,
-                        
-                        categoriaLocal: 'general', // Todas son 'general'
-                        paisLocal: pais // ¡Ya sabemos el país!
+                        categoriaLocal: 'general',
+                        paisLocal: pais 
                     });
                 });
+                
+                // --- ¡LOG MEJORADO! ---
+                const count = response.data.articles.length;
+                totalObtenidosNewsAPI += count;
+                console.log(`-> Obtenidos ${count} artículos de NewsAPI para ${pais}.`);
 
             } catch (newsApiError) {
+                // El error 401 saldrá aquí, por cada país
                 console.error(`Error al llamar a NewsAPI para ${pais}: ${newsApiError.message}`);
                 erroresFetch.push(`NewsAPI-${pais}`);
             }
         }
         
-        console.log(`Se obtuvieron ${articulosParaIA.length} artículos en total.`);
+        console.log(`--- TOTAL: ${totalObtenidosGNews} (GNews) + ${totalObtenidosNewsAPI} (NewsAPI) = ${articulosParaIA.length} artículos obtenidos.`);
 
         // --- PASO 3: Lógica "Inteligente" de Detección de País ---
-        // Recorremos los artículos y asignamos país si no lo tienen (los de GNews)
+        console.log("Iniciando detección de país para artículos de GNews...");
+        let detectados = 0;
         articulosParaIA.forEach(article => {
             if (!article.paisLocal) { // Si es null (vino de GNews)
-                article.paisLocal = detectarPais(article.source.name, article.url);
+                const paisDetectado = detectarPais(article.source.name, article.url);
+                if (paisDetectado) {
+                    article.paisLocal = paisDetectado;
+                    detectados++;
+                }
             }
         });
-        console.log("Detección de país completada.");
+        console.log(`-> ${detectados} artículos de GNews fueron clasificados por país.`);
 
         // --- PASO 4: Crear el array de "Promesas" para la IA (Paralelo) ---
+        console.log(`Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
@@ -185,11 +196,11 @@ exports.syncGNews = async (req, res) => {
 
         // --- PASO 5: Ejecutar TODAS las promesas al mismo tiempo ---
         const resultadosCompletos = await Promise.all(promesasDeArticulos);
-        console.log(`Generación con IA completada. ${resultadosCompletos.length} artículos procesados.`);
+        console.log(`Generación con IA completada.`);
 
         // --- PASO 6: Preparar la escritura en la Base de Datos ---
         const operations = resultadosCompletos
-            .filter(r => r && r.articuloGenerado && r.url) // Filtramos los que fallaron
+            .filter(r => r && r.articuloGenerado && r.url) 
             .map(article => ({
                 updateOne: {
                     filter: { enlaceOriginal: article.url }, 
@@ -200,8 +211,8 @@ exports.syncGNews = async (req, res) => {
                             contenido: article.content,
                             imagen: article.image,
                             sitio: 'noticias.lat',
-                            categoria: article.categoriaLocal, // 'general'
-                            pais: article.paisLocal, // 'ar', 'mx', 'co', 'py', 'cl', o null
+                            categoria: article.categoriaLocal, 
+                            pais: article.paisLocal, 
                             fuente: article.source.name,
                             enlaceOriginal: article.url,
                             fecha: new Date(article.publishedAt),
@@ -217,7 +228,7 @@ exports.syncGNews = async (req, res) => {
         let totalArticulosActualizados = 0;
         
         if (operations.length > 0) {
-            console.log(`Guardando ${operations.length} artículos en la base de datos...`);
+            console.log(`Guardando ${operations.length} artículos válidos en la base de datos...`);
             const result = await Article.bulkWrite(operations);
             totalArticulosNuevos = result.upsertedCount;
             totalArticulosActualizados = result.modifiedCount;
