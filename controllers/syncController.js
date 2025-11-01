@@ -10,13 +10,11 @@ const DEEPSEEK_API_KEYS = [
     process.env.DEEPSEEK_API_KEY_5,
 ].filter(Boolean);
 
-// --- CARGAMOS LAS API KEYS DE NOTICIAS ---
+// --- SOLO USAREMOS GNEWS ---
 const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
-const API_KEY_NEWSAPI = process.env.NEWSAPI_API_KEY;
 
-// --- ¡NUEVO! AUMENTAMOS LA CANTIDAD DE ARTÍCULOS ---
-const MAX_ARTICLES_GNEWS = 25;
-const MAX_ARTICLES_NEWSAPI = 25;
+// --- ¡NUEVO! PEDIREMOS 100 ARTÍCULOS ---
+const MAX_ARTICLES_GNEWS = 100;
 
 
 /**
@@ -61,56 +59,77 @@ async function getAIArticle(articleUrl, apiKey) {
 }
 
 /**
- * Función "inteligente" para detectar el país basado en la fuente.
- * (Sin cambios)
+ * --- ¡VERSIÓN 2.0 MEJORADA! ---
+ * Función "inteligente" para detectar el país.
+ * AHORA ACEPTA EL TEXTO DE LA IA PARA UNA SEGUNDA REVISIÓN.
  */
-function detectarPais(sourceName, url) {
-    if (!sourceName && !url) return null;
+function detectarPais(sourceName, url, iaText = '') {
+    const textoCompleto = `${sourceName} ${url} ${iaText}`.toLowerCase();
+
+    // Países por URL (más preciso)
+    if (textoCompleto.includes('.py')) return 'py';
+    if (textoCompleto.includes('.cl')) return 'cl';
+    if (textoCompleto.includes('.pe')) return 'pe';
+    if (textoCompleto.includes('.uy')) return 'uy';
+    if (textoCompleto.includes('.bo')) return 'bo';
+    if (textoCompleto.includes('.cr')) return 'cr';
+    if (textoCompleto.includes('.ec')) return 'ec';
+    if (textoCompleto.includes('.ar')) return 'ar';
+    if (textoCompleto.includes('.co')) return 'co';
+    if (textoCompleto.includes('.mx')) return 'mx';
+    if (textoCompleto.includes('.ve')) return 've';
+    if (textoCompleto.includes('.cu')) return 'cu';
+    if (textoCompleto.includes('.br')) return 'br';
+
+    // Países por nombre de fuente o texto de IA (menos preciso)
+    if (textoCompleto.includes('paraguay')) return 'py';
+    if (textoCompleto.includes('chile')) return 'cl';
+    if (textoCompleto.includes('perú') || textoCompleto.includes('peru')) return 'pe';
+    if (textoCompleto.includes('uruguay')) return 'uy';
+    if (textoCompleto.includes('bolivia')) return 'bo';
+    if (textoCompleto.includes('costa rica')) return 'cr';
+    if (textoCompleto.includes('ecuador')) return 'ec';
+    if (textoCompleto.includes('argentina')) return 'ar';
+    if (textoCompleto.includes('colombia')) return 'co';
+    if (textoCompleto.includes('méxico') || textoCompleto.includes('mexico')) return 'mx';
+    if (textoCompleto.includes('venezuela')) return 've';
+    if (textoCompleto.includes('cuba')) return 'cu';
+    if (textoCompleto.includes('brasil')) return 'br';
     
-    const textoCompleto = `${sourceName} ${url}`.toLowerCase();
-
-    // Países que GNews no nos da
-    if (textoCompleto.includes('abc.com.py') || textoCompleto.includes('abc color') || textoCompleto.includes('última hora') || textoCompleto.includes('.com.py')) return 'py';
-    if (textoCompleto.includes('latercera.com') || textoCompleto.includes('biobiochile.cl') || textoCompleto.includes('cooperativa.cl') || textoCompleto.includes('.cl')) return 'cl';
-    if (textoCompleto.includes('elcomercio.pe') || textoCompleto.includes('rpp.pe') || textoCompleto.includes('larepublica.pe') || textoCompleto.includes('.pe')) return 'pe';
-    if (textoCompleto.includes('elobservador.com.uy') || textoCompleto.includes('elpais.com.uy') || textoCompleto.includes('.uy')) return 'uy';
-    if (textoCompleto.includes('eldeber.com.bo') || textoCompleto.includes('paginasiete.bo') || textoCompleto.includes('.bo')) return 'bo';
-    if (textoCompleto.includes('crhoy.com') || textoCompleto.includes('nacion.com') || textoCompleto.includes('.cr')) return 'cr';
-    if (textoCompleto.includes('eluniverso.com') || textoCompleto.includes('elcomercio.com') || textoCompleto.includes('.ec')) return 'ec';
-
-    // Países que NewsAPI ya nos da, pero GNews podría incluir
-    if (textoCompleto.includes('clarin.com') || textoCompleto.includes('lanacion.com.ar') || textoCompleto.includes('.com.ar')) return 'ar';
-    if (textoCompleto.includes('eltiempo.com') || textoCompleto.includes('elespectador.com') || textoCompleto.includes('.com.co')) return 'co';
-    if (textoCompleto.includes('eluniversal.com.mx') || textoCompleto.includes('reforma.com') || textoCompleto.includes('.com.mx')) return 'mx';
-    if (textoCompleto.includes('el-nacional.com') || textoCompleto.includes('globovision.com') || textoCompleto.includes('.com.ve')) return 've';
-    if (textoCompleto.includes('granma.cu') || textoCompleto.includes('.cu')) return 'cu';
-    if (textoCompleto.includes('globo.com') || textoCompleto.includes('folha.uol.com.br') || textoCompleto.includes('.br')) return 'br';
+    // Fuentes conocidas
+    if (textoCompleto.includes('abc color') || textoCompleto.includes('última hora')) return 'py';
+    if (textoCompleto.includes('latercera') || textoCompleto.includes('biobiochile')) return 'cl';
+    if (textoCompleto.includes('elcomercio.pe') || textoCompleto.includes('rpp') || textoCompleto.includes('larepublica.pe')) return 'pe';
+    if (textoCompleto.includes('clarin') || textoCompleto.includes('la nacion')) return 'ar';
+    if (textoCompleto.includes('eltiempo.com') || textoCompleto.includes('elespectador.com')) return 'co';
+    if (textoCompleto.includes('eluniversal.com.mx') || textoCompleto.includes('reforma')) return 'mx';
 
     return null; // No se pudo detectar
 }
 
 
 /**
- * [PRIVADO] Sincronizar GNews y NewsAPI con nuestra Base de Datos
- * --- ¡VERSIÓN HÍBRIDA MEJORADA! ---
+ * [PRIVADO] Sincronizar GNews con nuestra Base de Datos
+ * * --- ¡VERSIÓN GNEWS-ONLY MEJORADA! ---
  */
 exports.syncGNews = async (req, res) => {
     if (DEEPSEEK_API_KEYS.length === 0) {
         return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
     }
-    if (!API_KEY_GNEWS || !API_KEY_NEWSAPI) {
-        return res.status(500).json({ error: "Faltan GNEWS_API_KEY o NEWSAPI_API_KEY en el .env" });
+    if (!API_KEY_GNEWS) {
+        return res.status(500).json({ error: "Falta GNEWS_API_KEY en el .env" });
     }
-    console.log(`Iniciando sync HÍBRIDO con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
+    console.log(`Iniciando sync GNEWS-ONLY con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
     let erroresFetch = [];
     let articulosParaIA = [];
     let totalObtenidosGNews = 0;
-    let totalObtenidosNewsAPI = 0;
+    let detectadosPaso1 = 0;
+    let detectadosPaso2 = 0;
 
     try {
         // --- PASO 1: Obtener artículos de GNews (Noticias Generales) ---
-        console.log(`Obteniendo noticias de GNews (General) | Max: ${MAX_ARTICLES_GNEWS}...`);
+        console.log(`Paso 1: Obteniendo noticias de GNews (General) | Max: ${MAX_ARTICLES_GNEWS}...`);
         try {
             const urlGNews = `https://gnews.io/api/v4/top-headlines?category=general&lang=es&max=${MAX_ARTICLES_GNEWS}&apikey=${API_KEY_GNEWS}`;
             const response = await axios.get(urlGNews);
@@ -122,69 +141,28 @@ exports.syncGNews = async (req, res) => {
                     paisLocal: null 
                 });
             });
-            // --- ¡LOG MEJORADO! ---
             totalObtenidosGNews = response.data.articles.length;
             console.log(`-> Obtenidos ${totalObtenidosGNews} artículos de GNews.`);
             
         } catch (gnewsError) {
             console.error(`Error al llamar a GNews: ${gnewsError.message}`);
             erroresFetch.push('GNews-general');
+            return res.status(500).json({ error: "Error al llamar a GNews." });
         }
 
-        // --- PASO 2: Obtener artículos de NewsAPI (Noticias por País) ---
-        const paisesNewsAPI = ['ar', 'mx', 'co', 'br', 've', 'cu'];
-        
-        console.log(`Obteniendo noticias de NewsAPI para: ${paisesNewsAPI.join(', ')} | Max: ${MAX_ARTICLES_NEWSAPI} c/u...`);
-
-        for (const pais of paisesNewsAPI) {
-            try {
-                const urlNewsAPI = `https://newsapi.org/v2/top-headlines?country=${pais}&pageSize=${MAX_ARTICLES_NEWSAPI}&apiKey=${API_KEY_NEWSAPI}`;
-                const response = await axios.get(urlNewsAPI);
-
-                response.data.articles.forEach(article => {
-                    articulosParaIA.push({
-                        title: article.title,
-                        description: article.description || 'Sin descripción.',
-                        content: article.content || article.description,
-                        image: article.urlToImage,
-                        source: { name: article.source.name }, 
-                        url: article.url,
-                        publishedAt: article.publishedAt,
-                        categoriaLocal: 'general',
-                        paisLocal: pais 
-                    });
-                });
-                
-                // --- ¡LOG MEJORADO! ---
-                const count = response.data.articles.length;
-                totalObtenidosNewsAPI += count;
-                console.log(`-> Obtenidos ${count} artículos de NewsAPI para ${pais}.`);
-
-            } catch (newsApiError) {
-                // El error 401 saldrá aquí, por cada país
-                console.error(`Error al llamar a NewsAPI para ${pais}: ${newsApiError.message}`);
-                erroresFetch.push(`NewsAPI-${pais}`);
-            }
-        }
-        
-        console.log(`--- TOTAL: ${totalObtenidosGNews} (GNews) + ${totalObtenidosNewsAPI} (NewsAPI) = ${articulosParaIA.length} artículos obtenidos.`);
-
-        // --- PASO 3: Lógica "Inteligente" de Detección de País ---
-        console.log("Iniciando detección de país para artículos de GNews...");
-        let detectados = 0;
+        // --- PASO 2: Lógica "Inteligente" de Detección de País (Paso 1) ---
+        console.log("Paso 2: Detección de país (Por Fuente/URL)...");
         articulosParaIA.forEach(article => {
-            if (!article.paisLocal) { // Si es null (vino de GNews)
-                const paisDetectado = detectarPais(article.source.name, article.url);
-                if (paisDetectado) {
-                    article.paisLocal = paisDetectado;
-                    detectados++;
-                }
+            const paisDetectado = detectarPais(article.source.name, article.url);
+            if (paisDetectado) {
+                article.paisLocal = paisDetectado;
+                detectadosPaso1++;
             }
         });
-        console.log(`-> ${detectados} artículos de GNews fueron clasificados por país.`);
+        console.log(`-> ${detectadosPaso1} artículos clasificados por fuente/URL.`);
 
-        // --- PASO 4: Crear el array de "Promesas" para la IA (Paralelo) ---
-        console.log(`Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
+        // --- PASO 3: Generación de IA (Paralelo) ---
+        console.log(`Paso 3: Iniciando generación de IA para ${articulosParaIA.length} artículos...`);
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
@@ -194,58 +172,82 @@ exports.syncGNews = async (req, res) => {
                 });
         });
 
-        // --- PASO 5: Ejecutar TODAS las promesas al mismo tiempo ---
         const resultadosCompletos = await Promise.all(promesasDeArticulos);
-        console.log(`Generación con IA completada.`);
+        const articulosValidosIA = resultadosCompletos.filter(r => r && r.articuloGenerado && r.url);
+        console.log(`-> ${articulosValidosIA.length} artículos procesados por IA.`);
 
-        // --- PASO 6: Preparar la escritura en la Base de Datos ---
-        const operations = resultadosCompletos
-            .filter(r => r && r.articuloGenerado && r.url) 
-            .map(article => ({
-                updateOne: {
-                    filter: { enlaceOriginal: article.url }, 
-                    update: {
-                        $set: {
-                            titulo: article.title,
-                            descripcion: article.description,
-                            contenido: article.content,
-                            imagen: article.image,
-                            sitio: 'noticias.lat',
-                            categoria: article.categoriaLocal, 
-                            pais: article.paisLocal, 
-                            fuente: article.source.name,
-                            enlaceOriginal: article.url,
-                            fecha: new Date(article.publishedAt),
-                            articuloGenerado: article.articuloGenerado
-                        }
-                    },
-                    upsert: true 
+
+        // --- PASO 4: ¡NUEVO! Detección de País (Paso 2, con IA) ---
+        console.log("Paso 4: Re-detección de país (Usando texto de IA)...");
+        articulosValidosIA.forEach(article => {
+            if (!article.paisLocal) { // Si sigue siendo null
+                const paisDetectadoIA = detectarPais(article.source.name, article.url, article.articuloGenerado);
+                if (paisDetectadoIA) {
+                    article.paisLocal = paisDetectadoIA;
+                    detectadosPaso2++;
                 }
-            }));
+            }
+        });
+        console.log(`-> ${detectadosPaso2} artículos adicionales clasificados por IA.`);
 
-        // --- PASO 7: Guardar todo en la Base de Datos ---
+
+        // --- PASO 5: Preparar la escritura en la Base de Datos ---
+        const operations = articulosValidosIA.map(article => ({
+            updateOne: {
+                filter: { enlaceOriginal: article.url }, 
+                update: {
+                    $set: {
+                        titulo: article.title,
+                        descripcion: article.description,
+                        contenido: article.content,
+                        imagen: article.image,
+                        sitio: 'noticias.lat',
+                        categoria: article.categoriaLocal, 
+                        pais: article.paisLocal, // ¡Clasificado!
+                        fuente: article.source.name,
+                        enlaceOriginal: article.url,
+                        fecha: new Date(article.publishedAt),
+                        articuloGenerado: article.articuloGenerado
+                    }
+                },
+                upsert: true 
+            }
+        }));
+
+        // --- PASO 6: Guardar todo en la Base de Datos ---
         let totalArticulosNuevos = 0;
         let totalArticulosActualizados = 0;
         
         if (operations.length > 0) {
-            console.log(`Guardando ${operations.length} artículos válidos en la base de datos...`);
+            console.log(`Paso 5: Guardando ${operations.length} artículos en la base de datos...`);
             const result = await Article.bulkWrite(operations);
             totalArticulosNuevos = result.upsertedCount;
             totalArticulosActualizados = result.modifiedCount;
         }
 
-        console.log("¡Sincronización HÍBRIDA completada!");
+        console.log("¡Sincronización GNEWS-ONLY completada!");
+        
+        const totalClasificados = detectadosPaso1 + detectadosPaso2;
+        
+        // --- PASO 7: Respuesta con Reporte Detallado ---
         res.json({ 
-            message: "Sincronización HÍBRIDA completada.", 
-            nuevosArticulosGuardados: totalArticulosNuevos,
-            articulosActualizados: totalArticulosActualizados,
-            articulosFallidosIA: articulosParaIA.length - operations.length,
-            apisConError: erroresFetch
+            message: "Sincronización GNEWS-ONLY completada.",
+            reporte: {
+                totalObtenidosGNews: totalObtenidosGNews,
+                totalProcesadosIA: articulosValidosIA.length,
+                totalFallidosIA: totalObtenidosGNews - articulosValidosIA.length,
+                clasificadosPorFuente: detectadosPaso1,
+                clasificadosPorIA: detectadosPaso2,
+                totalClasificados: totalClasificados,
+                totalSinClasificar: articulosValidosIA.length - totalClasificados,
+                nuevosArticulosGuardados: totalArticulosNuevos,
+                articulosActualizados: totalArticulosActualizados
+            }
         });
 
     } catch (error) {
-        console.error("Error catastrófico en syncGNews (híbrido):", error.message);
-        res.status(500).json({ error: "Error al sincronizar (híbrido)." });
+        console.error("Error catastrófico en syncGNews (GNews-Only):", error.message);
+        res.status(500).json({ error: "Error al sincronizar (GNews-Only)." });
     }
 };
 

@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const Article = require('../models/article'); // Importamos el "molde"
+const Article = require('../models/article');
 
 /**
  * [PÚBLICO] Obtener LISTA de artículos
@@ -37,13 +37,11 @@ exports.getArticles = async (req, res) => {
             
         } else if (categoria && categoria !== 'todos') {
             // 3. LÓGICA DE FILTRO POR CATEGORÍA (si no es 'todos')
-            // (Si en el futuro añades 'deportes', 'tecnologia', esta lógica funcionará)
             filtro.categoria = categoria;
             
         } else {
             // 4. LÓGICA POR DEFECTO (categoria='todos' o 'general')
-            // Simplemente no aplica filtro de país o categoría,
-            // mostrando todo lo del 'sitio', ordenado por fecha.
+            // No aplica filtro de país o categoría, mostrando todo lo del 'sitio'.
             // (Esta es la corrección clave. Ya no filtramos por pais=null)
         }
         // --- FIN DE LA LÓGICA ---
