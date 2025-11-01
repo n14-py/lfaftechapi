@@ -5,7 +5,39 @@ const syncController = require('../controllers/syncController');
 const mongoose = require('mongoose'); // Necesario para el middleware
 
 // =============================================
-// MIDDLEWARE DE AUTENTICACIÓN (traído de server.js)
+// 1. LÓGICA DE CACHÉ EN MEMORIA (In-Memory Cache)
+// =============================================
+const cache = {};
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos en milisegundos
+
+const cacheMiddleware = (req, res, next) => {
+    // Generamos una clave única basada en la URL completa (incluyendo query params)
+    const key = req.originalUrl;
+
+    if (cache[key] && (Date.now() - cache[key].timestamp < CACHE_DURATION)) {
+        // [CACHE HIT] La data está fresca, la servimos inmediatamente.
+        console.log(`[CACHE HIT] Sirviendo ${key} desde caché.`);
+        return res.json(cache[key].data);
+    }
+    
+    // [CACHE MISS] Si falla la caché, sobrescribimos res.json para almacenar la respuesta.
+    res.sendResponse = res.json;
+    res.json = (body) => {
+        cache[key] = {
+            timestamp: Date.now(),
+            data: body
+        };
+        console.log(`[CACHE MISS] Almacenando ${key} en caché.`);
+        // Llamamos al método original para enviar la respuesta al cliente
+        res.sendResponse(body);
+    };
+
+    next();
+};
+
+
+// =============================================
+// 2. MIDDLEWARE DE AUTENTICACIÓN (Rutas privadas)
 // =============================================
 // Esta función revisará que solo tú puedas AÑADIR contenido
 const requireAdminKey = (req, res, next) => {
@@ -18,21 +50,22 @@ const requireAdminKey = (req, res, next) => {
 };
 
 // =============================================
-// RUTAS PÚBLICAS (para tus 70 sitios)
+// 3. RUTAS PÚBLICAS
 // =============================================
 
 // GET /api/articles/recommended
-// (Debe ir ANTES de /:id para que no confunda "recommended" con un ID)
-router.get('/articles/recommended', articleController.getRecommendedArticles);
+// Se aplica el caché aquí también
+router.get('/articles/recommended', cacheMiddleware, articleController.getRecommendedArticles);
 
 // GET /api/articles?sitio=...&categoria=...
-router.get('/articles', articleController.getArticles);
+// APLICAMOS EL MIDDLEWARE DE CACHÉ
+router.get('/articles', cacheMiddleware, articleController.getArticles);
 
 // GET /api/article/:id
 router.get('/article/:id', articleController.getArticleById);
 
 // =============================================
-// RUTAS PRIVADAS (para ti y el Cron Job)
+// 4. RUTAS PRIVADAS
 // =============================================
 
 // POST /api/sync-gnews

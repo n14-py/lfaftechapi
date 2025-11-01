@@ -4,10 +4,13 @@ const Article = require('../models/article'); // Importamos el "molde"
 /**
  * [PÚBLICO] Obtener LISTA de artículos
  * (Lógica de la ruta GET /api/articles)
+ * --- ¡ACTUALIZADO CON FILTRO DE PAÍS Y BÚSQUEDA! ---
  */
 exports.getArticles = async (req, res) => {
     try {
-        const { sitio, categoria, limite, pagina } = req.query;
+        // ¡Ahora también leemos 'query' para la búsqueda!
+        const { sitio, categoria, limite, pagina, pais, query } = req.query;
+        
         if (!sitio) {
             return res.status(400).json({ error: "El parámetro 'sitio' es obligatorio." });
         }
@@ -16,13 +19,34 @@ exports.getArticles = async (req, res) => {
         const paginaNum = parseInt(pagina) || 1;
         const skip = (paginaNum - 1) * limiteNum;
         
-        // Si la categoría es 'todos', no filtra por categoría.
+        // Definiciones base
         let filtro = { sitio: sitio };
-        if (categoria && categoria !== 'todos') {
-            filtro.categoria = categoria;
-        }
+        let sort = { fecha: -1 }; // Ordenar por fecha por defecto
+        let projection = {};      // Para el score de búsqueda (relevancia)
 
-        const articles = await Article.find(filtro).sort({ fecha: -1 }).skip(skip).limit(limiteNum);
+        // --- LÓGICA DE FILTRO PRINCIPAL (Búsqueda vs. Categoría/País) ---
+        if (query) {
+            // 1. LÓGICA DE BÚSQUEDA POR TEXTO (Global)
+            filtro.$text = { $search: query };
+            sort = { score: { $meta: "textScore" } }; // Ordenar por relevancia
+            projection = { score: { $meta: "textScore" } }; // Necesario para ordenar
+            
+        } else if (pais) {
+            // 2. LÓGICA DE FILTRO POR PAÍS (Existente)
+            filtro.pais = pais;
+        } else {
+            // 3. LÓGICA DE FILTRO POR CATEGORÍA (Existente)
+            // Nos aseguramos de que sean noticias SIN país (las generales).
+            filtro.pais = { $in: [null, undefined] };
+            
+            if (categoria && categoria !== 'todos') {
+                filtro.categoria = categoria;
+            }
+        }
+        // --- FIN DE LA LÓGICA ---
+
+        // Ejecutamos la consulta, aplicando el filtro, proyección (score), orden y paginación
+        const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
 
         res.json({

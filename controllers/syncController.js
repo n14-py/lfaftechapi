@@ -72,12 +72,27 @@ exports.syncGNews = async (req, res) => {
     console.log(`Iniciando sync paralelo con ${DEEPSEEK_API_KEYS.length} API keys.`);
 
     const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
-    const categorias = [
-        { gnews: 'general', local: 'general' },
-        { gnews: 'sports', local: 'deportes' },
-        { gnews: 'technology', local: 'tecnologia' },
-        { gnews: 'entertainment', local: 'entretenimiento' }
+    
+    // --- ¡NUEVA LISTA DE TRABAJOS! ---
+    const fetchJobs = [
+        // Categorías (sin país)
+        { type: 'category', gnews: 'general', local: 'general', pais: null },
+        { type: 'category', gnews: 'sports', local: 'deportes', pais: null },
+        { type: 'category', gnews: 'technology', local: 'tecnologia', pais: null },
+        { type: 'category', gnews: 'entertainment', local: 'entretenimiento', pais: null },
+        
+        // Países (se guardarán con categoría 'general' y su código de país)
+        // GNews usa 2-letter ISO codes
+        { type: 'country', gnews: 'ar', local: 'general', pais: 'ar' }, // Argentina
+        { type: 'country', gnews: 'mx', local: 'general', pais: 'mx' }, // México
+        { type: 'country', gnews: 'co', local: 'general', pais: 'co' }, // Colombia
+        { type: 'country', gnews: 'cl', local: 'general', pais: 'cl' }, // Chile
+        { type: 'country', gnews: 'pe', local: 'general', pais: 'pe' }, // Perú
+        { type: 'country', gnews: 'py', local: 'general', pais: 'py' }, // Paraguay
     ];
+    
+    // Ahora son 10 trabajos. 15 artículos por trabajo = 150 artículos en total.
+    const MAX_ARTICLES_PER_JOB = 20; 
 
     let totalArticulosNuevos = 0;
     let totalArticulosActualizados = 0;
@@ -86,21 +101,31 @@ exports.syncGNews = async (req, res) => {
 
     try {
         // --- PASO 1: Obtener TODOS los artículos de GNews primero ---
-        for (const cat of categorias) {
-            console.log(`Obteniendo noticias de GNews para: ${cat.local}...`);
+        for (const job of fetchJobs) {
+            console.log(`Obteniendo noticias de GNews para: ${job.pais || job.gnews}...`);
             
-            // --- ¡NUEVO LÍMITE DE 20! --- (Puedes subirlo a 30 si tu plan de $7 lo soporta)
-            const urlGNews = `https://gnews.io/api/v4/top-headlines?category=${cat.gnews}&lang=es&max=20&apikey=${API_KEY_GNEWS}`;
-            
+            let urlGNews = '';
+            if (job.type === 'category') {
+                // Búsqueda por Categoría
+                urlGNews = `https://gnews.io/api/v4/top-headlines?category=${job.gnews}&lang=es&max=${MAX_ARTICLES_PER_JOB}&apikey=${API_KEY_GNEWS}`;
+            } else { 
+                // Búsqueda por País
+                urlGNews = `https://gnews.io/api/v4/top-headlines?country=${job.gnews}&lang=es&max=${MAX_ARTICLES_PER_JOB}&apikey=${API_KEY_GNEWS}`;
+            }
+
             try {
                 const response = await axios.get(urlGNews);
-                // Añadimos los artículos a la lista, guardando su categoría
+                // Añadimos los artículos a la lista, guardando su categoría Y PAÍS
                 response.data.articles.forEach(article => {
-                    articulosParaIA.push({ ...article, categoriaLocal: cat.local });
+                    articulosParaIA.push({ 
+                        ...article, 
+                        categoriaLocal: job.local, 
+                        paisLocal: job.pais // Será 'ar', 'mx', or null
+                    });
                 });
             } catch (gnewsError) {
-                console.error(`Error al llamar a GNews para ${cat.gnews}: ${gnewsError.message}`);
-                erroresGNews.push(cat.gnews);
+                console.error(`Error al llamar a GNews para ${job.gnews}: ${gnewsError.message}`);
+                erroresGNews.push(job.gnews);
             }
         }
         
@@ -109,7 +134,6 @@ exports.syncGNews = async (req, res) => {
         // --- PASO 2: Crear el array de "Promesas" para la IA (El trabajo en paralelo) ---
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             // --- ¡Rotamos las 5 API Keys! ---
-            // Ej: Artículo 0 usa Key 0, Artículo 1 usa Key 1, ..., Artículo 5 usa Key 0
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
             // Retornamos la promesa de la llamada a la IA
@@ -121,7 +145,6 @@ exports.syncGNews = async (req, res) => {
         });
 
         // --- PASO 3: Ejecutar TODAS las promesas al mismo tiempo ---
-        // El servidor esperará aquí hasta que las 80 peticiones terminen (o fallen)
         const resultadosCompletos = await Promise.all(promesasDeArticulos);
 
         console.log(`Generación con IA completada. ${resultadosCompletos.length} artículos procesados.`);
@@ -139,7 +162,8 @@ exports.syncGNews = async (req, res) => {
                             contenido: article.content,
                             imagen: article.image,
                             sitio: 'noticias.lat',
-                            categoria: article.categoriaLocal, // Usamos la categoría que guardamos
+                            categoria: article.categoriaLocal, // 'general', 'deportes', etc.
+                            pais: article.paisLocal, // 'ar', 'mx', 'co', o null
                             fuente: article.source.name,
                             enlaceOriginal: article.url,
                             fecha: new Date(article.publishedAt),
@@ -175,7 +199,7 @@ exports.syncGNews = async (req, res) => {
 
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente
- * (Esta función sigue siendo secuencial/lenta, pero se usa menos)
+ * (Actualizado para incluir el campo 'pais')
  */
 exports.createManualArticle = async (req, res) => {
     try {
@@ -183,7 +207,8 @@ exports.createManualArticle = async (req, res) => {
             return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
         }
         
-        const { titulo, descripcion, imagen, categoria, sitio, fuente, enlaceOriginal, fecha, contenido } = req.body;
+        // --- ¡NUEVO! ---
+        const { titulo, descripcion, imagen, categoria, sitio, fuente, enlaceOriginal, fecha, contenido, pais } = req.body;
         
         // Usa la primera API key para la creación manual
         const resultadoIA = await getAIArticle(enlaceOriginal, DEEPSEEK_API_KEYS[0]);
@@ -194,6 +219,7 @@ exports.createManualArticle = async (req, res) => {
             fuente: fuente || 'Fuente desconocida',
             enlaceOriginal: enlaceOriginal || '#',
             fecha: fecha ? new Date(fecha) : new Date(),
+            pais: pais || null, // --- ¡AÑADIDO! ---
             articuloGenerado: resultadoIA ? resultadoIA.articuloGenerado : null
         });
 
