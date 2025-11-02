@@ -6,8 +6,6 @@ const ArticleSchema = new mongoose.Schema({
     descripcion: { type: String, required: true },
     imagen: { type: String, required: true },
     
-    // 'contenido' SE HA ELIMINADO PARA AHORRAR ESPACIO
-    
     // 'categoria' será "general", "deportes", "tecnologia", etc.
     categoria: { type: String, required: true, index: true }, 
     
@@ -25,10 +23,17 @@ const ArticleSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// --- ÍNDICE DE TEXTO PARA BÚSQUEDA ---
-ArticleSchema.index({ titulo: 'text', descripcion: 'text' });
+// --- ¡¡AQUÍ ESTÁ LA MAGIA!! ---
+// Antes solo buscaba en 'titulo' y 'descripcion'.
+// Ahora le decimos a MongoDB que cree un índice de texto que incluya
+// el título, la descripción Y el artículo generado.
+ArticleSchema.index({ 
+    titulo: 'text', 
+    descripcion: 'text', 
+    articuloGenerado: 'text' 
+});
 // ---------------------------------------------
 
 
-// Exportamos el modelo para que el resto de la app pueda usarlooa
+// Exportamos el modelo para que el resto de la app pueda usarlo
 module.exports = mongoose.model('Article', ArticleSchema);
