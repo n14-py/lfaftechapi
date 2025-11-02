@@ -13,29 +13,38 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // =============================================
-// MIDDLEWARES
+// MIDDLEWARES (¡AQUÍ ESTÁ LA SOLUCIÓN DE CORS!)
 // =============================================
-// Definimos los sitios web que SÍ tienen permiso de llamar a esta API
+
+// 1. Definimos los sitios web que SÍ tienen permiso de llamar a esta API
 const whiteList = [
-    'https://www.noticias.lat', // Tu sitio de noticias
-    'https://turadio.lat'      // Tu nuevo sitio de radio (asumiendo que es .lat)
-    // Añade aquí tu URL de Vercel si es diferente, ej: 'https://turadio.vercel.app'
-    // Añade aquí tu localhost si pruebas localmente, ej: 'http://127.0.0.1:5500'
+    'http://127.0.0.1:5500',  // Tu localhost (IP)
+    'http://localhost:5500',   // Tu localhost (Nombre)
+    'https://www.noticias.lat', // Tu sitio de noticias en Vercel
+    'https://noticias.lat',    // Tu sitio de noticias sin 'www'
+    'https://turadio.lat'      // Tu futuro sitio de radio en Vercel
+    // Añade aquí tu URL de Vercel de desarrollo si es diferente
+    // ej: 'https://turadio-proyecto.vercel.app' 
 ];
 
-app.use(cors({
+const corsOptions = {
     origin: function (origin, callback) {
         // Si el 'origin' (el sitio que llama) está en nuestra lista blanca,
-        // o si es una llamada desde el mismo servidor (undefined origin),
+        // o si es una llamada desde el mismo servidor (como Postman, que no tiene origin),
         // le damos permiso.
         if (whiteList.indexOf(origin) !== -1 || !origin) {
             callback(null, true);
         } else {
-            // Si el dominio no está en la lista, lo bloqueamos.
-            callback(new Error('No permitido por CORS'));
+            // --- ¡AQUÍ ESTÁ LA DEPURACIÓN! ---
+            // Si el origen no está en la lista, lo mostramos en el log de Render
+            console.error(`CORS Error: El origen ${origin} NO está en la whitelist.`);
+            // --- FIN DE LA DEPURACIÓN ---
+            callback(new Error('No permitido por CORS')); // Y lo bloqueamos
         }
     }
-}));
+};
+
+app.use(cors(corsOptions)); // ¡Usamos las opciones de CORS!
 app.use(express.json());
 
 // =============================================
@@ -48,8 +57,6 @@ mongoose.connect(process.env.MONGODB_URI)
 // =============================================
 // RUTAS DE LA API
 // =============================================
-// Le decimos a Express que todas las rutas que empiecen con '/api'
-// deben ser manejadas por nuestro archivo 'routes/index.js'
 app.use('/api', apiRoutes);
 
 // Ruta de bienvenida básica
