@@ -1,24 +1,24 @@
 const express = require('express');
 const router = express.Router();
 
-// Importamos el archivo de rutas de artículos
+// Importamos el archivo de rutas de artículos (EXISTENTE)
 const articleRoutes = require('./articles');
 
-// (Quitamos el 'require' de articleController de aquí)
+// --- ¡LÍNEA 1 AÑADIDA! ---
+// Importamos el nuevo archivo de rutas de radio
+const radioRoutes = require('./radio');
 
-// Le decimos a Express que use el archivo 'articles.js'
-// para cualquier URL que llegue a este punto (ej: /api/articles)
+
+// Le decimos a Express que use el archivo 'articles.js' (EXISTENTE)
 router.use(articleRoutes);
 
-// (Quitamos la ruta del sitemap de aquí)
+// --- ¡LÍNEA 2 AÑADIDA! ---
+// Le decimos a Express que use también el archivo 'radio.js'
+router.use(radioRoutes);
+
 
 // --- ASÍ AÑADIRÁS 'pelis.lat' EN EL FUTURO ---
-// 1. Crearías 'routes/movies.js'
-// 2. Lo importarías aquí:
-// const movieRoutes = require('./movies');
-// 3. Y lo "usarías" aquí:
-// router.use(movieRoutes);
-// ... ¡Y listo! Sin tocar nada más.
+// ...
 
 // Exportamos el router principal
 module.exports = router;
