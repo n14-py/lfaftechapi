@@ -2,25 +2,24 @@ const mongoose = require('mongoose');
 
 // Este es el "molde" para las estaciones de radio
 const RadioSchema = new mongoose.Schema({
-    // Usamos el UUID de radio-browser como nuestro ID único
     uuid: { type: String, required: true, unique: true }, 
     nombre: { type: String, required: true },
-    pais_code: { type: String, required: true, index: true }, // ej: "PY"
-    pais: { type: String, required: true }, // ej: "Paraguay"
-    generos: { type: String, index: true }, // ej: "rock, pop, 90s"
-    logo: { type: String }, // URL del favicon
+    pais_code: { type: String, required: true, index: true }, 
+    pais: { type: String, required: true }, // ¡Este es el campo que faltaba!
+    generos: { type: String, index: true }, 
+    logo: { type: String },
     stream_url: { type: String, required: true },
-    // Guardamos los "votos" o "clicks" de la API externa para ordenar por popularidad
     popularidad: { type: Number, default: 0, index: true }
 }, { timestamps: true });
 
 
-// --- ¡ÍNDICE PARA EL BUSCADOR! ---
-// Le decimos a MongoDB que cree un índice de texto para
-// buscar por 'nombre' y 'generos'.
+// --- ¡¡AQUÍ ESTÁ LA MAGIA!! ---
+// Antes solo buscaba en 'nombre' y 'generos'.
+// Ahora le decimos a MongoDB que busque en 'nombre', 'generos' Y 'pais'.
 RadioSchema.index({ 
     nombre: 'text', 
-    generos: 'text' 
+    generos: 'text',
+    pais: 'text'  // ¡CAMPO AÑADIDO AL BUSCADOR!
 });
 // ---------------------------------
 

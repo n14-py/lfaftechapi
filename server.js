@@ -21,7 +21,8 @@ const whiteList = [
     'http://127.0.0.1:5500',  // Tu localhost (IP)
     'http://localhost:5500',   // Tu localhost (Nombre)
     'https://www.noticias.lat', // Tu sitio de noticias en Vercel
-    'https://noticias.lat',    // Tu sitio de noticias sin 'www'
+    'https://noticias.lat',
+    'https://turadiolat.vercel.app'    // Tu sitio de noticias sin 'www'
     'https://turadio.lat'      // Tu futuro sitio de radio en Vercel
     // Añade aquí tu URL de Vercel de desarrollo si es diferente
     // ej: 'https://turadio-proyecto.vercel.app' 
