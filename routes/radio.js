@@ -6,7 +6,6 @@ const radioController = require('../controllers/radioController'); // El que bus
 const radioSyncController = require('../controllers/radioSyncController'); // El que llena la DB
 
 // 2. --- Copiamos el middleware de seguridad ---
-// (Esto es para proteger la ruta de sincronización, igual que en /api/sync-gnews)
 const requireAdminKey = (req, res, next) => {
     const apiKey = req.headers['x-api-key'];
     if (apiKey && apiKey === process.env.ADMIN_API_KEY) {
@@ -19,27 +18,27 @@ const requireAdminKey = (req, res, next) => {
 // =============================================
 // 3. RUTAS PÚBLICAS (para el frontend)
 // =============================================
-// (Estas rutas ahora leen de NUESTRA base de datos rápida)
 
-// Ruta para buscar estaciones (¡Ahora es un buscador!)
-// Ej: /api/radio/buscar?query=rock (Buscador)
-// Ej: /api/radio/buscar?pais=PY (Filtro de País)
-// Ej: /api/radio/buscar?genero=rock (Filtro de Género)
-// Ej: /api/radio/buscar (Trae las más populares por defecto)
+// Ruta para buscar estaciones (Buscador, País, Género)
 router.get('/radio/buscar', radioController.searchRadios);
 
-// Ruta para obtener la lista de géneros (desde nuestra DB)
+// Ruta para obtener la lista de géneros
 router.get('/radio/generos', radioController.getTags);
 
-// Ruta para obtener la lista de países (desde nuestra DB)
+// Ruta para obtener la lista de países
 router.get('/radio/paises', radioController.getCountries);
+
+// --- ¡NUEVA RUTA! ---
+// Ruta para obtener la info de UNA SOLA radio por su ID (UUID)
+// Ej: /api/radio/12345-abcde-67890
+router.get('/radio/:uuid', radioController.getRadioByUuid);
+
 
 // =============================================
 // 4. RUTA PRIVADA (para el admin)
 // =============================================
 
 // Ruta para *iniciar* la sincronización y llenar nuestra base de datos.
-// Esta ruta debe estar protegida con la llave de admin.
 router.post('/radio/sync', requireAdminKey, radioSyncController.syncRadios);
 
 module.exports = router;
