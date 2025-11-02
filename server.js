@@ -23,7 +23,8 @@ const whiteList = [
     'https://www.noticias.lat', // Tu sitio de noticias en Vercel
     'https://noticias.lat',
     'https://www.turadio.lat' ,  // Tu sitio de noticias sin 'www'
-    'https://turadio.lat'      // Tu futuro sitio de radio en Vercel
+    'https://turadio.lat', 
+    'https://turadiolat-1f0g3n2p3-nando14s-projects.vercel.app'     // Tu futuro sitio de radio en Vercel
     // Añade aquí tu URL de Vercel de desarrollo si es diferente
     // ej: 'https://turadio-proyecto.vercel.app' 
 ];
