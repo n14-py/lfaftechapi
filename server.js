@@ -15,7 +15,27 @@ const PORT = process.env.PORT || 3000;
 // =============================================
 // MIDDLEWARES
 // =============================================
-app.use(cors());
+// Definimos los sitios web que SÍ tienen permiso de llamar a esta API
+const whiteList = [
+    'https://www.noticias.lat', // Tu sitio de noticias
+    'https://turadio.lat'      // Tu nuevo sitio de radio (asumiendo que es .lat)
+    // Añade aquí tu URL de Vercel si es diferente, ej: 'https://turadio.vercel.app'
+    // Añade aquí tu localhost si pruebas localmente, ej: 'http://127.0.0.1:5500'
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Si el 'origin' (el sitio que llama) está en nuestra lista blanca,
+        // o si es una llamada desde el mismo servidor (undefined origin),
+        // le damos permiso.
+        if (whiteList.indexOf(origin) !== -1 || !origin) {
+            callback(null, true);
+        } else {
+            // Si el dominio no está en la lista, lo bloqueamos.
+            callback(new Error('No permitido por CORS'));
+        }
+    }
+}));
 app.use(express.json());
 
 // =============================================
