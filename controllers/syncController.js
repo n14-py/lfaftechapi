@@ -17,8 +17,7 @@ const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY;
 // --- LÍMITES DE API (10 por país) ---
 const MAX_ARTICLES_PER_COUNTRY = 10; 
 
-// --- ¡NUEVO! MAPA DE TRADUCCIÓN DE NEWSDATA.IO ---
-// (Traduce "argentina" a "ar")
+// --- MAPA DE TRADUCCIÓN DE NEWSDATA.IO ---
 const paisNewsDataMap = {
     "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
     "colombia": "co", "costa rica": "cr", "cuba": "cu", "ecuador": "ec", 
@@ -27,7 +26,7 @@ const paisNewsDataMap = {
     "dominican republic": "do", "uruguay": "uy", "venezuela": "ve"
 };
 
-// --- Lista de 19 países de LATAM para NEWSDATA.IO (usa los códigos de 2 letras) ---
+// --- Lista de 19 países de LATAM para NEWSDATA.IO ---
 const PAISES_NEWSDATA = [
     "ar", "bo", "br", "cl", "co", "cr", "cu", "ec", "sv", 
     "gt", "hn", "mx", "ni", "pa", "py", "pe", "do", "uy", "ve"
@@ -42,7 +41,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Llama a la API de DeepSeek.
- * --- ¡VERSIÓN ACTUALIZADA CON CLASIFICADOR DE 8 CATEGORÍAS! ---
+ * --- ¡VERSIÓN ACTUALIZADA CON LIMPIADOR DE JSON! ---
  */
 async function getAIArticle(articleUrl, apiKey) {
     if (!articleUrl || !articleUrl.startsWith('http')) return null;
@@ -50,14 +49,13 @@ async function getAIArticle(articleUrl, apiKey) {
         console.error("Error: No se proporcionó una API key de DeepSeek.");
         return null;
     }
-    const API_URL = 'https://api.deepseek.com/v1/chat/completions';
+    const API_URL = '[https://api.deepseek.com/v1/chat/completions](https://api.deepseek.com/v1/chat/completions)';
     const headers = {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
     };
     
-    // --- 1. PROMPT DE SISTEMA (MODIFICADO) ---
-    // Le pedimos que responda en JSON y clasifique.
+    // --- 1. PROMPT DE SISTEMA (Sin cambios) ---
     const systemPrompt = `Eres un asistente de curación de noticias para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver dos cosas:
 1. La categoría principal del artículo.
 2. Un artículo de noticias completo y detallado.
@@ -72,8 +70,7 @@ Ejemplo de formato:
   "articuloGenerado": "Texto del artículo aquí..."
 }`;
 
-    // --- 2. PROMPT DE USUARIO (MODIFICADO) ---
-    // Le pedimos el JSON.
+    // --- 2. PROMPT DE USUARIO (Sin cambios) ---
     const userPrompt = `Analiza la siguiente URL y devuélveme el JSON con la 'categoriaSugerida' (debe ser una de la lista: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general) y el 'articuloGenerado'. URL: ${articleUrl}`;
     
     const body = {
@@ -84,38 +81,49 @@ Ejemplo de formato:
     try {
         const response = await axios.post(API_URL, body, { headers });
         
-        // --- 3. LÓGICA DE PARSEO (MODIFICADA) ---
-        // Ahora esperamos un JSON, no texto plano.
+        // --- 3. LÓGICA DE PARSEO (¡AQUÍ ESTÁ LA CORRECCIÓN!) ---
         if (response.data.choices && response.data.choices.length > 0) {
             
-            try {
-                // El contenido es un string JSON, hay que convertirlo
-                const jsonResponse = JSON.parse(response.data.choices[0].message.content);
-                
-                // Verificamos que el JSON tenga lo que esperamos
-                if (jsonResponse.categoriaSugerida && jsonResponse.articuloGenerado) {
-                    
-                    // Verificamos si la categoría es válida
-                    const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
-                    if (!categoriasValidas.includes(jsonResponse.categoriaSugerida)) {
-                         // Si la IA inventa una categoría, la forzamos a "general"
-                         jsonResponse.categoriaSugerida = "general";
-                    }
+            let responseText = response.data.choices[0].message.content;
 
-                    // ¡ÉXITO! Devolvemos ambas cosas.
-                    return {
-                        categoriaSugerida: jsonResponse.categoriaSugerida,
-                        articuloGenerado: jsonResponse.articuloGenerado,
-                        originalArticle: articleUrl
-                    };
+            try {
+                // --- ¡LA SOLUCIÓN! ---
+                // Buscamos el JSON que está entre { y }
+                // Esto elimina los "```json" y los mensajes de error.
+                const match = responseText.match(/\{[\s\S]*\}/);
+
+                if (match && match[0]) {
+                    const jsonString = match[0];
+                    const jsonResponse = JSON.parse(jsonString);
+
+                    // Verificamos que el JSON tenga lo que esperamos
+                    if (jsonResponse.categoriaSugerida && jsonResponse.articuloGenerado) {
+                        
+                        // Verificamos si la categoría es válida
+                        const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
+                        if (!categoriasValidas.includes(jsonResponse.categoriaSugerida)) {
+                             jsonResponse.categoriaSugerida = "general";
+                        }
+
+                        // ¡ÉXITO! Devolvemos ambas cosas.
+                        return {
+                            categoriaSugerida: jsonResponse.categoriaSugerida,
+                            articuloGenerado: jsonResponse.articuloGenerado,
+                            originalArticle: articleUrl
+                        };
+                    } else {
+                        console.error(`Error: DeepSeek devolvió un JSON incompleto para ${articleUrl}`);
+                        return null;
+                    }
                 } else {
-                    console.error(`Error: DeepSeek devolvió un JSON incompleto para ${articleUrl}`);
-                    return null; // El JSON no vino como esperábamos
+                    // Si no encuentra un JSON (ej: "Lo siento, no puedo acceder...")
+                    console.error(`Error: DeepSeek no devolvió un JSON (Respuesta: ${responseText}) para ${articleUrl}`);
+                    return null;
                 }
             } catch (e) {
-                // El AI no devolvió un JSON válido
-                console.error(`Error: DeepSeek no devolvió un JSON válido para ${articleUrl}:`, e.message);
-                console.log("Respuesta recibida:", response.data.choices[0].message.content);
+                // Error si el JSON extraído sigue estando malformado
+                console.error(`Error al parsear el JSON extraído para ${articleUrl}:`, e.message);
+                console.log("Respuesta recibida:", responseText);
                 return null;
             }
         }
@@ -129,7 +137,7 @@ Ejemplo de formato:
 
 /**
  * [PRIVADO] Sincronizar Noticias
- * * --- ¡VERSIÓN DOBLE BUCLE (CON CLASIFICACIÓN IA)! ---
+ * (Sin cambios en esta función, solo en getAIArticle)
  */
 exports.syncGNews = async (req, res) => {
     try {
@@ -157,9 +165,8 @@ exports.syncGNews = async (req, res) => {
                 
                 if (response.data.results) {
                     response.data.results.forEach(article => {
-                        // --- ¡AQUÍ ESTÁ LA TRADUCCIÓN! ---
-                        const paisNombreCompleto = article.country[0]; // ej: "argentina"
-                        const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto; // ej: "ar"
+                        const paisNombreCompleto = article.country[0];
+                        const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
                         
                         articulosParaIA.push({
                             title: article.title,
@@ -169,7 +176,7 @@ exports.syncGNews = async (req, res) => {
                             url: article.link,
                             publishedAt: article.pubDate,
                             categoriaLocal: 'general', // La IA lo reclasificará
-                            paisLocal: paisCodigo // Guardamos el código "ar"
+                            paisLocal: paisCodigo
                         });
                     });
                     const count = response.data.results.length;
@@ -190,15 +197,14 @@ exports.syncGNews = async (req, res) => {
         
         for (const pais of PAISES_GNEWS) {
              try {
-                // Traemos solo 'top-headlines' (general) para ahorrar llamadas
                 const urlGNews = `https://gnews.io/api/v4/top-headlines?country=${pais}&lang=es&max=${MAX_ARTICLES_PER_COUNTRY}&apikey=${API_KEY_GNEWS}`;
                 const response = await axios.get(urlGNews);
                 
                 response.data.articles.forEach(article => {
                     articulosParaIA.push({ 
                         ...article,
-                        categoriaLocal: 'general', // La IA lo reclasificará
-                        paisLocal: pais // GNews ya nos da el código "ar"
+                        categoriaLocal: 'general',
+                        paisLocal: pais
                     });
                 });
                 const count = response.data.articles.length;
@@ -222,7 +228,6 @@ exports.syncGNews = async (req, res) => {
         const promesasDeArticulos = articulosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
-            // Esta función ahora devuelve { categoriaSugerida, articuloGenerado, ... }
             return getAIArticle(article.url, apiKeyParaUsar)
                 .then(resultadoIA => {
                     return { ...article, ...resultadoIA };
@@ -247,12 +252,8 @@ exports.syncGNews = async (req, res) => {
                         descripcion: article.description || 'Sin descripción.',
                         imagen: article.image,
                         sitio: 'noticias.lat',
-                        
-                        // ¡¡AQUÍ ESTÁ LA MAGIA!!
-                        // Usamos la categoría de la IA.
                         categoria: article.categoriaSugerida, 
-                        
-                        pais: article.paisLocal, // ¡Todos guardados como "ar", "py", etc!
+                        pais: article.paisLocal,
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
                         fecha: new Date(article.publishedAt),
@@ -308,10 +309,8 @@ exports.createManualArticle = async (req, res) => {
             return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
         }
         
-        // 'categoria' ahora es opcional, la IA lo determinará
         const { titulo, descripcion, imagen, sitio, fuente, enlaceOriginal, fecha, pais } = req.body;
         
-        // Llamamos a la IA para que genere y CLASIFIQUE
         const resultadoIA = await getAIArticle(enlaceOriginal, DEEPSEEK_API_KEYS[0]);
 
         if (!resultadoIA) {
@@ -328,7 +327,6 @@ exports.createManualArticle = async (req, res) => {
             fecha: fecha ? new Date(fecha) : new Date(),
             pais: pais || null,
             
-            // Usamos los datos de la IA
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida
         });
