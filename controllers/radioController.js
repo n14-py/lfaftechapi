@@ -2,20 +2,23 @@ const Radio = require('../models/radio'); // Importamos nuestro modelo de la bas
 
 /**
  * [PÚBLICO] Buscar estaciones por País, Género o Texto
- * (Ahora combina query Y pais, y acepta excludeUuid para RECOMENDACIONES)
+ * (Ahora devuelve el listado, el total y soporta paginación)
  */
 exports.searchRadios = async (req, res) => {
     try {
-        const { pais, genero, query, limite, excludeUuid } = req.query; // ¡CAMBIO AÑADIDO: excludeUuid!
+        const { pais, genero, query, limite, pagina, excludeUuid } = req.query; // Añadimos 'pagina'
 
-        let filtro = {}; // Filtro de MongoDB
+        const limiteNum = parseInt(limite) || 100;
+        const paginaNum = parseInt(pagina) || 1;
+        const skip = (paginaNum - 1) * limiteNum;
+
+        let filtro = {}; 
         let sort = { popularidad: -1 }; 
         let projection = {};
-        const limiteNum = parseInt(limite) || 100;
-
-        // 1. FILTRO DE EXCLUSIÓN (Para recomendaciones)
+        
+        // 1. FILTRO DE EXCLUSIÓN
         if (excludeUuid) {
-            filtro.uuid = { $ne: excludeUuid }; // Excluye el UUID actual
+            filtro.uuid = { $ne: excludeUuid };
         }
 
         // 2. Siempre filtramos por país si se proporciona
@@ -24,36 +27,38 @@ exports.searchRadios = async (req, res) => {
         }
 
         if (query) {
-            // 3. Si hay 'query', añadimos la búsqueda de texto
+            // 3. LÓGICA DE BÚSQUEDA POR TEXTO (para nombre, país o frecuencia)
             filtro.$text = { $search: query };
             projection = { score: { $meta: "textScore" } }; 
             sort = { score: { $meta: "textScore" } }; 
         } else if (genero) {
-            // 4. Si no hay 'query' pero hay 'genero'
+            // 4. LÓGICA DE GÉNERO
             filtro.generos = new RegExp(genero, 'i');
         } 
         
-        // 5. Lógica de aleatoriedad para Recomendaciones (sin query)
-        if (!query && (pais || genero)) {
+        // 5. Lógica de aleatoriedad SOLAMENTE para RECOMENDACIONES (cuando excludeUuid está presente y NO hay query)
+        let skipRandom = skip;
+        if (excludeUuid && !query) {
             const totalCount = await Radio.countDocuments(filtro);
-            // Salto aleatorio para mostrar diferentes radios
-            const randomSkip = totalCount > 10 ? Math.floor(Math.random() * (totalCount - 10)) : 0;
-            
-             const radios = await Radio.find(filtro, projection)
-                                  .sort(sort)
-                                  .skip(randomSkip) // Salto aleatorio para variedad
-                                  .limit(limiteNum);
-
-             res.json(radios);
-             return; 
-        }
+            skipRandom = totalCount > limiteNum ? Math.floor(Math.random() * (totalCount - limiteNum)) : 0;
+        } 
         
-        // Caso normal (query o populares)
-        const radios = await Radio.find(filtro, projection)
-                                  .sort(sort)
-                                  .limit(limiteNum);
+        // Ejecución de las consultas
+        const [radios, total] = await Promise.all([
+            Radio.find(filtro, projection)
+                .sort(sort)
+                .skip(skipRandom) 
+                .limit(limiteNum),
+            Radio.countDocuments(filtro) // Obtener el total sin limitación
+        ]);
         
-        res.json(radios);
+        // 6. Devolver el resultado en formato de paginación
+        res.json({
+            totalRadios: total,
+            totalPaginas: Math.ceil(total / limiteNum),
+            paginaActual: paginaNum,
+            radios: radios
+        });
 
     } catch (error) {
         console.error("Error en searchRadios (DB):", error.message);
@@ -129,7 +134,7 @@ exports.getTags = async (req, res) => {
  */
 exports.getRadioByUuid = async (req, res) => {
     try {
-        const { uuid } = req.params; // Obtenemos el ID de la URL
+        const { uuid } = req.params; 
 
         if (!uuid) {
             return res.status(400).json({ error: "Se requiere un UUID de estación." });
@@ -141,7 +146,7 @@ exports.getRadioByUuid = async (req, res) => {
             return res.status(404).json({ error: "Estación no encontrada." });
         }
         
-        res.json(radio); // Devolvemos la info de esa radio
+        res.json(radio); 
 
     } catch (error) {
         console.error("Error en getRadioByUuid (DB):", error.message);
