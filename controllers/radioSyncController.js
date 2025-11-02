@@ -1,8 +1,9 @@
 const axios = require('axios');
 const Radio = require('../models/radio');
 
-// El servidor de la API de radios.
-const BASE_URL = 'https://de1.api.radio-browser.info/json';
+// ¡AQUÍ ESTÁ EL CAMBIO!
+// Cambiamos de 'de1' (Alemania) a 'fi1' (Finlandia)
+const BASE_URL = 'https://fi1.api.radio-browser.info/json';
 
 // Lista de códigos de países de LATAM que vamos a sincronizar
 const PAISES_LATAM = [
@@ -14,7 +15,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * [PRIVADO] Sincronizar todas las radios de LATAM
- * Esto se ejecutará una vez al día para llenar nuestra base de datos.
  */
 exports.syncRadios = async (req, res) => {
     console.log(`Iniciando sincronización de radios para ${PAISES_LATAM.length} países...`);
@@ -28,11 +28,10 @@ exports.syncRadios = async (req, res) => {
         for (const paisCode of PAISES_LATAM) {
             try {
                 // 2. Pedimos todas las estaciones de ese país
-                // (bycountrycodeexact no está documentado, usamos 'bycountrycode')
                 const url = `${BASE_URL}/stations/bycountrycode/${paisCode}`;
                 const response = await axios.get(url, {
                     params: {
-                        hidebroken: true // No traer radios que ya se saben caídas
+                        hidebroken: true // No traer radios que sabemos que están caídas
                     }
                 });
                 
@@ -41,13 +40,11 @@ exports.syncRadios = async (req, res) => {
 
                 // 3. Preparamos las operaciones de guardado
                 for (const station of radios) {
-                    // Ignoramos si no tiene URL de stream o nombre
                     if (!station.url_resolved || !station.name) {
                         continue;
                     }
 
-                    // 4. Creamos la operación 'upsert' (actualizar si existe, crear si no)
-                    // Usamos el 'stationuuid' como ID único
+                    // 4. Creamos la operación 'upsert'
                     operations.push({
                         updateOne: {
                             filter: { uuid: station.stationuuid },
@@ -57,13 +54,13 @@ exports.syncRadios = async (req, res) => {
                                     nombre: station.name,
                                     pais_code: station.countrycode.toUpperCase(),
                                     pais: station.country,
-                                    generos: station.tags, // Guardamos los géneros como string separado por comas
+                                    generos: station.tags,
                                     logo: station.favicon || null,
-                                    stream_url: station.url_resolved, // URL del audio
-                                    popularidad: station.votes // Usamos 'votes' para ordenar
+                                    stream_url: station.url_resolved,
+                                    popularidad: station.votes 
                                 }
                             },
-                            upsert: true // ¡La magia está aquí!
+                            upsert: true 
                         }
                     });
                 }
@@ -72,10 +69,10 @@ exports.syncRadios = async (req, res) => {
                 console.error(`Error al buscar radios de [${paisCode}]: ${error.message}`);
                 erroresFetch.push(paisCode);
             }
-            await sleep(500); // Pequeña pausa para no saturar la API externa
+            await sleep(500); // Pequeña pausa
         }
 
-        // 5. Ejecutamos todas las operaciones de guardado en la DB de una sola vez
+        // 5. Ejecutamos todas las operaciones de guardado
         console.log(`...Guardando ${operations.length} operaciones en MongoDB...`);
         let totalArticulosNuevos = 0;
         let totalArticulosActualizados = 0;
