@@ -1,106 +1,120 @@
-const axios = require('axios');
-
-// Usamos uno de los servidores recomendados y estables de la red de radio-browser
-const BASE_URL = 'https://de1.api.radio-browser.info/json';
+const Radio = require('../models/radio'); // ¡Importamos nuestro modelo de la base de datos!
 
 /**
- * Limpia los datos de la estación para enviar solo lo que necesitamos
- */
-function limpiarEstacion(station) {
-    return {
-        // Usamos 'stationuuid' como ID único
-        uuid: station.stationuuid, 
-        nombre: station.name,
-        pais_code: station.countrycode, //
-        pais: station.country,
-        generos: station.tags,
-        logo: station.favicon || null, // El logo (puede estar vacío)
-        // Esta es la URL de audio que el reproductor usará
-        stream_url: station.url_resolved 
-    };
-}
-
-/**
- * [PÚBLICO] Buscar estaciones por País o Género (Tag)
+ * [PÚBLICO] Buscar estaciones por País, Género o Texto
+ * --- ¡ACTUALIZADO! ---
+ * --- ¡Ahora busca en NUESTRA base de datos! ---
  */
 exports.searchRadios = async (req, res) => {
     try {
-        const { pais, genero, limite } = req.query;
+        const { pais, genero, query, limite } = req.query;
 
-        // Si no piden ni país ni género, no sabemos qué buscar
-        if (!pais && !genero) {
-            return res.status(400).json({ error: "Se requiere un 'pais' (ej: PY) o 'genero' (ej: rock)." });
-        }
+        let filtro = {}; // Filtro de MongoDB
+        let sort = { popularidad: -1 }; // Ordenar por popularidad (votos) por defecto
+        let projection = {};
+        const limiteNum = parseInt(limite) || 100;
 
-        const params = {
-            limit: limite || 100, // Traer 100 por defecto
-            hidebroken: true, // Ocultar radios que sabemos que están caídas
-            order: 'clickcount', // Traer las más populares primero
-            reverse: true
-        };
+        if (query) {
+            // 1. LÓGICA DE BÚSQUEDA POR TEXTO (para el buscador)
+            // Busca en los campos 'nombre' y 'generos' (definido en el modelo)
+            filtro.$text = { $search: query };
+            projection = { score: { $meta: "textScore" } }; 
+            sort = { score: { $meta: "textScore" } }; // Ordenar por relevancia de búsqueda
 
-        let url = `${BASE_URL}/stations/search`; // Endpoint de búsqueda avanzada
-
-        if (pais) {
-            params.countrycode = pais; // Buscar por código de país, ej: PY, AR
-        }
-        if (genero) {
-            params.tag = genero; // Buscar por género (tag)
-        }
-
-        const response = await axios.get(url, { params });
+        } else if (pais) {
+            // 2. LÓGICA DE FILTRO POR PAÍS
+            filtro.pais_code = pais.toUpperCase();
         
-        // Limpiamos los datos antes de enviarlos al frontend
-        const radios = response.data.map(limpiarEstacion);
+        } else if (genero) {
+            // 3. LÓGICA DE FILTRO POR GÉNERO (TAG)
+            // Busca que el género esté en el string 'generos' (ej: "rock, pop")
+            filtro.generos = new RegExp(genero, 'i'); // 'i' = case-insensitive
+        
+        } else {
+            // 4. LÓGICA POR DEFECTO (Populares)
+            // No se aplica filtro, solo se ordena por popularidad (ya definido en 'sort')
+        }
+
+        const radios = await Radio.find(filtro, projection)
+                                  .sort(sort)
+                                  .limit(limiteNum);
         
         res.json(radios);
 
     } catch (error) {
-        console.error("Error en searchRadios:", error.message);
+        console.error("Error en searchRadios (DB):", error.message);
         res.status(500).json({ error: "Error al buscar estaciones." });
     }
 };
 
 /**
  * [PÚBLICO] Obtener la lista de Países disponibles
+ * --- ¡ACTUALIZADO! ---
+ * --- ¡Ahora busca en NUESTRA base de datos! ---
  */
 exports.getCountries = async (req, res) => {
     try {
-        const url = `${BASE_URL}/countries`; // Endpoint de países
-        const response = await axios.get(url);
+        // Usamos 'aggregate' para obtener los pares únicos de código/nombre de país
+        // de las radios que YA tenemos en nuestra base de datos.
+        const paises = await Radio.aggregate([
+            { $group: { 
+                _id: { code: "$pais_code", name: "$pais" } 
+            }},
+            { $project: {
+                _id: 0,
+                code: "$_id.code",
+                name: "$_id.name"
+            }},
+            { $sort: { name: 1 } } // Ordenar alfabéticamente
+        ]);
         
-        // Filtramos solo países de LATAM (basado en nuestros códigos)
-        const codigosLatam = ["ar", "bo", "br", "cl", "co", "cr", "cu", "ec", "sv", "gt", "hn", "mx", "ni", "pa", "py", "pe", "do", "uy", "ve"];
-        
-        const paisesLatam = response.data.filter(pais => 
-            codigosLatam.includes(pais.iso_3166_1.toLowerCase())
-        );
-
-        res.json(paisesLatam);
+        res.json(paises);
 
     } catch (error) {
-        console.error("Error en getCountries:", error.message);
+        console.error("Error en getCountries (DB):", error.message);
         res.status(500).json({ error: "Error al obtener países." });
     }
 };
 
 /**
  * [PÚBLICO] Obtener la lista de Géneros (Tags) más populares
+ * --- ¡ACTUALIZADO! ---
+ * --- ¡Ahora busca en NUESTRA base de datos! ---
  */
 exports.getTags = async (req, res) => {
     try {
-        // Pedimos los 100 géneros más populares
-        const params = {
-            limit: 100,
-            orderby: 'stationcount',
-            reverse: true
-        };
-        const url = `${BASE_URL}/tags`; // Endpoint de tags/géneros
-        const response = await axios.get(url, { params });
-        res.json(response.data);
+        // Este es un proceso más complejo:
+        // 1. Toma todas las radios.
+        // 2. Separa el string "rock,pop,jazz" en un array ["rock", "pop", "jazz"].
+        // 3. Agrupa por cada género y cuenta cuántas radios hay.
+        // 4. Devuelve los 100 géneros más populares.
+        
+        const pipeline = [
+            { $project: {
+                generos: { $split: ["$generos", ","] }
+            }},
+            { $unwind: "$generos" },
+            { $match: { 
+                generos: { $exists: true, $ne: "", $ne: null, $regex: /.{2,}/ } 
+            }},
+            { $group: {
+                _id: "$generos",
+                count: { $sum: 1 }
+            }},
+            { $sort: { count: -1 } },
+            { $limit: 100 },
+            { $project: {
+                _id: 0,
+                name: "$_id",
+                stationcount: "$count"
+            }}
+        ];
+        
+        const tags = await Radio.aggregate(pipeline);
+        res.json(tags);
 
     } catch (error) {
-        console.error("Error en getTags:", error.message);
+        console.error("Error en getTags (DB):", error.message);
         res.status(500).json({ error: "Error al obtener géneros." });
     }
 };
