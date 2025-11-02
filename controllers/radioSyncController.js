@@ -1,8 +1,7 @@
 const axios = require('axios');
 const Radio = require('../models/radio');
 
-// ¡AQUÍ ESTÁ EL CAMBIO!
-// Cambiamos de 'de1' (Alemania) a 'fi1' (Finlandia)
+// Seguimos usando el servidor de Finlandia (fi1) que es estable
 const BASE_URL = 'https://fi1.api.radio-browser.info/json';
 
 // Lista de códigos de países de LATAM que vamos a sincronizar
@@ -21,30 +20,32 @@ exports.syncRadios = async (req, res) => {
     
     let totalRadiosSincronizadas = 0;
     let erroresFetch = [];
-    let operations = []; // Aquí guardaremos las operaciones de 'guardar'
+    let operations = []; 
 
     try {
-        // 1. Recorremos cada país de nuestra lista
         for (const paisCode of PAISES_LATAM) {
             try {
-                // 2. Pedimos todas las estaciones de ese país
-                const url = `${BASE_URL}/stations/bycountrycode/${paisCode}`;
+                // --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
+                // En lugar de: /stations/bycountrycode/PY
+                // Usamos:     /stations/search?countrycode=PY
+                const url = `${BASE_URL}/stations/search`; 
                 const response = await axios.get(url, {
                     params: {
-                        hidebroken: true // No traer radios que sabemos que están caídas
+                        countrycode: paisCode, //
+                        hidebroken: true,
+                        limit: 500 // Traer hasta 500 radios por país
                     }
                 });
+                // --- FIN DE LA CORRECCIÓN ---
                 
                 const radios = response.data;
                 console.log(`-> [${paisCode}] Encontradas ${radios.length} estaciones.`);
 
-                // 3. Preparamos las operaciones de guardado
                 for (const station of radios) {
                     if (!station.url_resolved || !station.name) {
                         continue;
                     }
 
-                    // 4. Creamos la operación 'upsert'
                     operations.push({
                         updateOne: {
                             filter: { uuid: station.stationuuid },
