@@ -2,32 +2,53 @@ const Radio = require('../models/radio'); // Importamos nuestro modelo de la bas
 
 /**
  * [PÚBLICO] Buscar estaciones por País, Género o Texto
- * (Ahora combina query Y pais)
+ * (Ahora combina query Y pais, y acepta excludeUuid para RECOMENDACIONES)
  */
 exports.searchRadios = async (req, res) => {
     try {
-        const { pais, genero, query, limite } = req.query;
+        const { pais, genero, query, limite, excludeUuid } = req.query; // ¡CAMBIO AÑADIDO: excludeUuid!
 
         let filtro = {}; // Filtro de MongoDB
         let sort = { popularidad: -1 }; 
         let projection = {};
         const limiteNum = parseInt(limite) || 100;
 
-        // 1. Siempre filtramos por país si se proporciona
+        // 1. FILTRO DE EXCLUSIÓN (Para recomendaciones)
+        if (excludeUuid) {
+            filtro.uuid = { $ne: excludeUuid }; // Excluye el UUID actual
+        }
+
+        // 2. Siempre filtramos por país si se proporciona
         if (pais) {
             filtro.pais_code = pais.toUpperCase();
         }
 
         if (query) {
-            // 2. Si hay 'query', añadimos la búsqueda de texto
+            // 3. Si hay 'query', añadimos la búsqueda de texto
             filtro.$text = { $search: query };
             projection = { score: { $meta: "textScore" } }; 
             sort = { score: { $meta: "textScore" } }; 
         } else if (genero) {
-            // 3. Si no hay 'query' pero hay 'genero'
+            // 4. Si no hay 'query' pero hay 'genero'
             filtro.generos = new RegExp(genero, 'i');
         } 
         
+        // 5. Lógica de aleatoriedad para Recomendaciones (sin query)
+        if (!query && (pais || genero)) {
+            const totalCount = await Radio.countDocuments(filtro);
+            // Salto aleatorio para mostrar diferentes radios
+            const randomSkip = totalCount > 10 ? Math.floor(Math.random() * (totalCount - 10)) : 0;
+            
+             const radios = await Radio.find(filtro, projection)
+                                  .sort(sort)
+                                  .skip(randomSkip) // Salto aleatorio para variedad
+                                  .limit(limiteNum);
+
+             res.json(radios);
+             return; 
+        }
+        
+        // Caso normal (query o populares)
         const radios = await Radio.find(filtro, projection)
                                   .sort(sort)
                                   .limit(limiteNum);
@@ -103,7 +124,6 @@ exports.getTags = async (req, res) => {
 };
 
 /**
- * --- ¡NUEVA FUNCIÓN! ---
  * [PÚBLICO] Obtener UNA SOLA radio por su UUID
  * (Para la página de "Más Info")
  */
