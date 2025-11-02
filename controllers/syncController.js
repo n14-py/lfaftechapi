@@ -356,3 +356,64 @@ exports.createManualArticle = async (req, res) => {
         res.status(500).json({ error: "Error al guardar el artículo." });
     }
 };
+
+
+
+/**
+ * [PÚBLICO] Generar el Sitemap.xml
+ * (Se añade al final de articleController.js)
+ */
+exports.getSitemap = async (req, res) => {
+    // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web
+    const BASE_URL = 'https://noticias.lat'; 
+
+    try {
+        // 1. Obtenemos todos los artículos de la DB
+        // Solo necesitamos el ID y la fecha para el sitemap
+        const articles = await Article.find()
+            .sort({ fecha: -1 })
+            .select('_id fecha');
+        
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>';
+        xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+
+        // 2. Añadir Páginas Estáticas (Homepage, Contacto, etc.)
+        const staticPages = [
+            { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
+            { loc: 'sobre-nosotros.html', priority: '0.80', changefreq: 'monthly' },
+            { loc: 'contacto.html', priority: '0.80', changefreq: 'monthly' },
+            { loc: 'politica-privacidad.html', priority: '0.50', changefreq: 'yearly' },
+            { loc: 'terminos.html', priority: '0.50', changefreq: 'yearly' },
+        ];
+
+        staticPages.forEach(page => {
+            xml += '<url>';
+            xml += `<loc>${BASE_URL}/${page.loc}</loc>`;
+            xml += `<priority>${page.priority}</priority>`;
+            xml += `<changefreq>${page.changefreq}</changefreq>`;
+            xml += '</url>';
+        });
+
+        // 3. Añadir todos los Artículos (Dinámicos)
+        articles.forEach(article => {
+            const articleDate = new Date(article.fecha).toISOString().split('T')[0];
+            xml += '<url>';
+            // URL del artículo en el frontend
+            xml += `<loc>${BASE_URL}/articulo.html?id=${article._id}</loc>`; 
+            xml += `<lastmod>${articleDate}</lastmod>`;
+            xml += '<changefreq>weekly</changefreq>'; // Puedes cambiar a 'daily' si actualizas artículos
+            xml += '<priority>0.90</priority>';
+            xml += '</url>';
+        });
+
+        xml += '</urlset>';
+
+        // 4. Enviar el XML
+        res.header('Content-Type', 'application/xml');
+        res.send(xml);
+
+    } catch (error) {
+        console.error("Error en getSitemap:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+};
