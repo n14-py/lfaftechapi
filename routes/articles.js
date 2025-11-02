@@ -53,6 +53,12 @@ const requireAdminKey = (req, res, next) => {
 // 3. RUTAS PÚBLICAS
 // =============================================
 
+// --- ¡¡AQUÍ ESTÁ LA RUTA DEL SITEMAP CORREGIDA!! ---
+// Como 'index.js' usa este router en la raíz '/api',
+// la ruta final seguirá siendo '/api/sitemap.xml'
+router.get('/sitemap.xml', articleController.getSitemap);
+// --------------------------------------------------
+
 // GET /api/articles/recommended
 // Se aplica el caché aquí también
 router.get('/articles/recommended', cacheMiddleware, articleController.getRecommendedArticles);
