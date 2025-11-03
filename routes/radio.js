@@ -36,10 +36,15 @@ router.get('/radio/:uuid', radioController.getRadioByUuid);
 
 
 // =============================================
-// 4. RUTA PRIVADA (para el admin)
+// 4. RUTAS PRIVADAS (para el admin)
 // =============================================
 
 // Ruta para *iniciar* la sincronización y llenar nuestra base de datos.
 router.post('/radio/sync', requireAdminKey, radioSyncController.syncRadios);
+
+// --- ¡¡NUEVA RUTA AÑADIDA!! ---
+// Ruta para sincronizar las descripciones de IA (en lotes de 20)
+router.post('/radio/sync-ai', requireAdminKey, radioSyncController.syncRadioAIDescriptions);
+// --------------------------------
 
 module.exports = router;

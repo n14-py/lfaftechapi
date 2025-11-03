@@ -1,22 +1,22 @@
 const axios = require('axios');
 const Radio = require('../models/radio');
+const bedrockClient = require('../utils/bedrockClient'); // Importamos el motor de IA
 
-// Seguimos usando el servidor de Finlandia (fi1) que es estable
+// --- Configuración (igual que antes) ---
 const BASE_URL = 'https://fi1.api.radio-browser.info/json';
-
-// Lista de códigos de países de LATAM que vamos a sincronizar
 const PAISES_LATAM = [
     "AR", "BO", "BR", "CL", "CO", "CR", "CU", "EC", "SV", 
     "GT", "HN", "MX", "NI", "PA", "PY", "PE", "DO", "UY", "VE"
 ];
-
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * [PRIVADO] Sincronizar todas las radios de LATAM
- */
+// =========================================================================
+// FUNCIÓN 1: Sincronizar los datos básicos de las radios (SIN CAMBIOS)
+// =========================================================================
 exports.syncRadios = async (req, res) => {
     console.log(`Iniciando sincronización de radios para ${PAISES_LATAM.length} países...`);
+    
+    // ... (El código de esta función es idéntico al que ya tenías)
     
     let totalRadiosSincronizadas = 0;
     let erroresFetch = [];
@@ -25,27 +25,16 @@ exports.syncRadios = async (req, res) => {
     try {
         for (const paisCode of PAISES_LATAM) {
             try {
-                // --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
-                // En lugar de: /stations/bycountrycode/PY
-                // Usamos:     /stations/search?countrycode=PY
                 const url = `${BASE_URL}/stations/search`; 
                 const response = await axios.get(url, {
-                    params: {
-                        countrycode: paisCode, //
-                        hidebroken: true,
-                        limit: 500 // Traer hasta 500 radios por país
-                    }
+                    params: { countrycode: paisCode, hidebroken: true, limit: 500 }
                 });
-                // --- FIN DE LA CORRECCIÓN ---
                 
                 const radios = response.data;
                 console.log(`-> [${paisCode}] Encontradas ${radios.length} estaciones.`);
 
                 for (const station of radios) {
-                    if (!station.url_resolved || !station.name) {
-                        continue;
-                    }
-
+                    if (!station.url_resolved || !station.name) continue;
                     operations.push({
                         updateOne: {
                             filter: { uuid: station.stationuuid },
@@ -65,15 +54,13 @@ exports.syncRadios = async (req, res) => {
                         }
                     });
                 }
-
             } catch (error) {
                 console.error(`Error al buscar radios de [${paisCode}]: ${error.message}`);
                 erroresFetch.push(paisCode);
             }
-            await sleep(500); // Pequeña pausa
+            await sleep(500);
         }
 
-        // 5. Ejecutamos todas las operaciones de guardado
         console.log(`...Guardando ${operations.length} operaciones en MongoDB...`);
         let totalArticulosNuevos = 0;
         let totalArticulosActualizados = 0;
@@ -87,7 +74,6 @@ exports.syncRadios = async (req, res) => {
 
         console.log("¡Sincronización de radios completada!");
         
-        // 6. Enviamos el reporte
         res.json({ 
             message: "Sincronización de radios completada.",
             reporte: {
@@ -104,3 +90,95 @@ exports.syncRadios = async (req, res) => {
         res.status(500).json({ error: "Error al sincronizar radios." });
     }
 };
+
+
+// =========================================================================
+// FUNCIÓN 2: Iniciar el trabajo pesado de IA (LA NUEVA LÓGICA)
+// =========================================================================
+
+/**
+ * [PRIVADO] Inicia el trabajo de IA en segundo plano.
+ * Esta es la función que llama la API.
+ */
+exports.syncRadioAIDescriptions = async (req, res) => {
+    // 1. Responde al usuario INMEDIATAMENTE
+    res.json({
+        message: "¡Trabajo iniciado! Procesando todas las radios en segundo plano. Revisa los logs de Render para ver el progreso."
+    });
+
+    // 2. Llama a la función real, pero SIN 'await'.
+    // Esto libera la solicitud, pero el proceso sigue corriendo.
+    _runFullAISync(); 
+};
+
+/**
+ * Esta función NO se exporta. Es el "trabajador" interno.
+ * Corre en segundo plano y procesa TODAS las radios en lotes.
+ */
+async function _runFullAISync() {
+    const LIMITE_LOTE = 20; // 20 radios en paralelo
+    let lotesProcesados = 0;
+    let radiosProcesadasExito = 0;
+    let seguirProcesando = true;
+
+    console.log("--- INICIO DE TRABAJO PESADO DE IA (Todas las radios) ---");
+
+    while (seguirProcesando) {
+        lotesProcesados++;
+        
+        try {
+            // 1. Buscar el siguiente lote
+            const radiosParaProcesar = await Radio.find({
+                $or: [
+                    { descripcionGenerada: { $exists: false } },
+                    { descripcionGenerada: null },
+                    { descripcionGenerada: "" }
+                ]
+            }).limit(LIMITE_LOTE);
+
+            // 2. Condición de salida: No hay más radios
+            if (radiosParaProcesar.length === 0) {
+                console.log("--- ¡TRABAJO COMPLETADO! No hay más radios que procesar. ---");
+                seguirProcesando = false;
+                break;
+            }
+
+            console.log(`[Lote #${lotesProcesados}] Iniciando... Se encontraron ${radiosParaProcesar.length} radios para procesar.`);
+
+            // 3. Mapear las promesas de IA (paralelo, igual que tu script de noticias)
+            const promesasDeIA = radiosParaProcesar.map(async (radio) => {
+                try {
+                    const descripcionSEO = await bedrockClient.generateRadioDescription(radio);
+                    
+                    if (descripcionSEO) {
+                        radio.descripcionGenerada = descripcionSEO;
+                        await radio.save();
+                        return { status: 'exito', nombre: radio.nombre };
+                    } else {
+                        return { status: 'fallo', nombre: radio.nombre };
+                    }
+                } catch (e) {
+                    console.error(`Error procesando ${radio.nombre}: ${e.message}`);
+                    return { status: 'fallo', nombre: radio.nombre };
+                }
+            });
+
+            // 4. Esperar que el lote termine
+            const resultados = await Promise.all(promesasDeIA);
+
+            // 5. Contar y reportar
+            const exitos = resultados.filter(r => r.status === 'exito').length;
+            const fallos = resultados.filter(r => r.status === 'fallo').length;
+            radiosProcesadasExito += exitos;
+
+            console.log(`[Lote #${lotesProcesados}] Completado. (Éxito: ${exitos}, Fallos: ${fallos}). Total de radios procesadas: ${radiosProcesadasExito}`);
+            
+            // 6. Pausa de 2 segundos para no saturar AWS y la DB
+            await sleep(2000); 
+
+        } catch (error) {
+            console.error(`Error catastrófico en el Lote #${lotesProcesados}:`, error.message);
+            seguirProcesando = false; // Detener en caso de error grave
+        }
+    }
+}
