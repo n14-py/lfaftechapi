@@ -1,6 +1,7 @@
 const axios = require('axios');
 const Radio = require('../models/radio');
-const bedrockClient = require('../utils/bedrockClient'); // Importamos el motor de IA
+// ¡Importamos solo la función que necesitamos!
+const { generateRadioDescription } = require('../utils/bedrockClient');
 
 // --- Configuración (igual que antes) ---
 const BASE_URL = 'https://fi1.api.radio-browser.info/json';
@@ -15,8 +16,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =========================================================================
 exports.syncRadios = async (req, res) => {
     console.log(`Iniciando sincronización de radios para ${PAISES_LATAM.length} países...`);
-    
-    // ... (El código de esta función es idéntico al que ya tenías)
     
     let totalRadiosSincronizadas = 0;
     let erroresFetch = [];
@@ -93,35 +92,35 @@ exports.syncRadios = async (req, res) => {
 
 
 // =========================================================================
-// FUNCIÓN 2: Iniciar el trabajo pesado de IA (LA NUEVA LÓGICA)
+// FUNCIÓN 2: Iniciar el trabajo pesado de IA (Lógica Rápida)
 // =========================================================================
 
 /**
  * [PRIVADO] Inicia el trabajo de IA en segundo plano.
- * Esta es la función que llama la API.
  */
 exports.syncRadioAIDescriptions = async (req, res) => {
     // 1. Responde al usuario INMEDIATAMENTE
     res.json({
-        message: "¡Trabajo iniciado! Procesando todas las radios en segundo plano. Revisa los logs de Render para ver el progreso."
+        message: "¡Trabajo iniciado! Procesando todas las radios en segundo plano (Modo Rápido). Revisa los logs de Render."
     });
 
-    // 2. Llama a la función real, pero SIN 'await'.
-    // Esto libera la solicitud, pero el proceso sigue corriendo.
+    // 2. Llama a la función real sin 'await'
     _runFullAISync(); 
 };
 
 /**
  * Esta función NO se exporta. Es el "trabajador" interno.
- * Corre en segundo plano y procesa TODAS las radios en lotes.
+ * ¡ESTA ES LA VERSIÓN RÁPIDA (Promise.all) SIN SERPER!
  */
 async function _runFullAISync() {
-    const LIMITE_LOTE = 20; // 20 radios en paralelo
+    // Usaremos un lote de 20. Es rápido y seguro para AWS.
+    // (Poner 100 podría dar timeouts de memoria en Render)
+    const LIMITE_LOTE = 20; 
     let lotesProcesados = 0;
     let radiosProcesadasExito = 0;
     let seguirProcesando = true;
 
-    console.log("--- INICIO DE TRABAJO PESADO DE IA (Todas las radios) ---");
+    console.log("--- INICIO DE TRABAJO PESADO DE IA (Modo Rápido sin Serper) ---");
 
     while (seguirProcesando) {
         lotesProcesados++;
@@ -136,19 +135,20 @@ async function _runFullAISync() {
                 ]
             }).limit(LIMITE_LOTE);
 
-            // 2. Condición de salida: No hay más radios
             if (radiosParaProcesar.length === 0) {
                 console.log("--- ¡TRABAJO COMPLETADO! No hay más radios que procesar. ---");
                 seguirProcesando = false;
                 break;
             }
 
-            console.log(`[Lote #${lotesProcesados}] Iniciando... Se encontraron ${radiosParaProcesar.length} radios para procesar.`);
+            console.log(`[Lote #${lotesProcesados}] Iniciando... Procesando ${radiosParaProcesar.length} radios en paralelo...`);
 
-            // 3. Mapear las promesas de IA (paralelo, igual que tu script de noticias)
+            // 2. ¡AQUÍ ESTÁ LA MAGIA! (Igual que tu script de noticias)
+            // Mapeamos cada radio a una promesa de IA
             const promesasDeIA = radiosParaProcesar.map(async (radio) => {
                 try {
-                    const descripcionSEO = await bedrockClient.generateRadioDescription(radio);
+                    // Llamamos directo a la IA para que invente todo
+                    const descripcionSEO = await generateRadioDescription(radio);
                     
                     if (descripcionSEO) {
                         radio.descripcionGenerada = descripcionSEO;
@@ -163,22 +163,21 @@ async function _runFullAISync() {
                 }
             });
 
-            // 4. Esperar que el lote termine
+            // 3. Esperar que el lote de IA termine
             const resultados = await Promise.all(promesasDeIA);
 
-            // 5. Contar y reportar
+            // 4. Contar y reportar
             const exitos = resultados.filter(r => r.status === 'exito').length;
             const fallos = resultados.filter(r => r.status === 'fallo').length;
             radiosProcesadasExito += exitos;
 
             console.log(`[Lote #${lotesProcesados}] Completado. (Éxito: ${exitos}, Fallos: ${fallos}). Total de radios procesadas: ${radiosProcesadasExito}`);
             
-            // 6. Pausa de 2 segundos para no saturar AWS y la DB
-            await sleep(2000); 
+            await sleep(2000); // Pausa de 2 seg entre lotes (para no sobrecargar)
 
         } catch (error) {
             console.error(`Error catastrófico en el Lote #${lotesProcesados}:`, error.message);
-            seguirProcesando = false; // Detener en caso de error grave
+            seguirProcesando = false;
         }
     }
 }
