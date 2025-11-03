@@ -19,6 +19,9 @@ const requireAdminKey = (req, res, next) => {
 // 3. RUTAS PÚBLICAS (para el frontend)
 // =============================================
 
+// RUTA DE SITEMAP
+router.get('/radio/sitemap.xml', radioController.getRadioSitemap);
+
 // Ruta para buscar estaciones (Buscador, País, Género)
 router.get('/radio/buscar', radioController.searchRadios);
 
@@ -28,9 +31,7 @@ router.get('/radio/generos', radioController.getTags);
 // Ruta para obtener la lista de países
 router.get('/radio/paises', radioController.getCountries);
 
-// --- ¡NUEVA RUTA! ---
 // Ruta para obtener la info de UNA SOLA radio por su ID (UUID)
-// Ej: /api/radio/12345-abcde-67890
 router.get('/radio/:uuid', radioController.getRadioByUuid);
 
 

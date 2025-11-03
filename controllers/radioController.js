@@ -8,7 +8,7 @@ exports.searchRadios = async (req, res) => {
     try {
         const { pais, genero, query, limite, pagina, excludeUuid } = req.query; // Añadimos 'pagina'
 
-        const limiteNum = parseInt(limite) || 100;
+        const limiteNum = parseInt(limite) || 20;
         const paginaNum = parseInt(pagina) || 1;
         const skip = (paginaNum - 1) * limiteNum;
 
@@ -151,5 +151,60 @@ exports.getRadioByUuid = async (req, res) => {
     } catch (error) {
         console.error("Error en getRadioByUuid (DB):", error.message);
         res.status(500).json({ error: "Error al buscar la estación." });
+    }
+};
+
+
+// --- ¡NUEVA FUNCIÓN! SITEMAP DINÁMICO ---
+/**
+ * [PÚBLICO] Generar el Sitemap.xml para las radios.
+ */
+exports.getRadioSitemap = async (req, res) => {
+    // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web (ej. https://turadio.lat)
+    const BASE_URL = 'https://turadio.lat'; 
+
+    try {
+        // 1. Obtenemos todos los UUIDs de las radios
+        const radios = await Radio.find()
+            .select('uuid')
+            .lean(); 
+
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>';
+        xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+
+        // 2. Añadir Páginas Estáticas
+        const staticPages = [
+            { loc: '', priority: '1.00', changefreq: 'hourly' }, 
+            { loc: 'index.html?filtro=generos', priority: '0.90', changefreq: 'daily' },
+            { loc: 'contacto.html', priority: '0.70', changefreq: 'monthly' },
+        ];
+
+        staticPages.forEach(page => {
+            xml += '<url>';
+            xml += `<loc>${BASE_URL}/${page.loc}</loc>`;
+            xml += `<priority>${page.priority}</priority>`;
+            xml += `<changefreq>${page.changefreq}</changefreq>`;
+            xml += '</url>';
+        });
+
+        // 3. Añadir todas las páginas de Detalle de Radio (Dinámicas)
+        radios.forEach(radio => {
+            xml += '<url>';
+            // URL del detalle de la radio
+            xml += `<loc>${BASE_URL}/index.html?radio=${radio.uuid}</loc>`; 
+            xml += '<changefreq>weekly</changefreq>';
+            xml += '<priority>0.80</priority>';
+            xml += '</url>';
+        });
+
+        xml += '</urlset>';
+
+        // 4. Enviar el XML
+        res.header('Content-Type', 'application/xml');
+        res.send(xml);
+
+    } catch (error) {
+        console.error("Error en getRadioSitemap:", error);
+        res.status(500).json({ error: "Error interno del servidor al generar sitemap." });
     }
 };
