@@ -109,13 +109,13 @@ exports.syncRadioAIDescriptions = async (req, res) => {
 
 /**
  * Esta función NO se exporta. Es el "trabajador" interno.
- * ¡ESTA ES LA VERSIÓN QUE ARREGLA EL ERROR "Too Many Requests" DE AWS!
+ * ¡ESTA ES LA VERSIÓN SÚPER SEGURA!
  */
 async function _runFullAISync() {
     
     // --- ¡¡AQUÍ ESTÁ EL CAMBIO!! ---
-    // Bajamos de 20 a 5 para no superar la cuota de AWS.
-    const LIMITE_LOTE = 5; 
+    // Bajamos de 5 a 1. Súper lento, pero súper seguro.
+    const LIMITE_LOTE = 1; 
     // ---------------------------------
     
     let lotesProcesados = 0;
@@ -143,7 +143,7 @@ async function _runFullAISync() {
                 break;
             }
 
-            console.log(`[Lote #${lotesProcesados}] Iniciando... Procesando ${radiosParaProcesar.length} radios en paralelo...`);
+            console.log(`[Lote #${lotesProcesados}] Iniciando... Procesando ${radiosParaProcesar.length} radios...`);
 
             // 2. Mapeamos cada radio a una promesa de IA
             const promesasDeIA = radiosParaProcesar.map(async (radio) => {
@@ -173,8 +173,8 @@ async function _runFullAISync() {
 
             console.log(`[Lote #${lotesProcesados}] Completado. (Éxito: ${exitos}, Fallos: ${fallos}). Total de radios procesadas: ${radiosProcesadasExito}`);
             
-            // Aumentamos la pausa a 5 segundos para estar 100% seguros
-            await sleep(5000); 
+            // Pausa de 3 segundos entre CADA radio.
+            await sleep(3000); 
 
         } catch (error) {
             console.error(`Error catastrófico en el Lote #${lotesProcesados}:`, error.message);
