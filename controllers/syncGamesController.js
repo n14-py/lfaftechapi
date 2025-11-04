@@ -150,6 +150,8 @@ exports.syncGames = async (req, res) => {
         
         try {
             // --- FASE 4A: Scrapear la página de detalle (Modo Básico, 1 crédito) ---
+            // No necesitamos &render=true aquí porque la info que queremos (el <iframe>)
+            // está en el HTML original.
             const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}`;
             const detailResponse = await axios.get(scraperDetailUrl);
             const detailHtml = detailResponse.data;
