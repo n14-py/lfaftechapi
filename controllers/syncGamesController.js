@@ -1,27 +1,21 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const Game = require('../models/game');
-// Eliminamos las importaciones de Bedrock, ya no se usan.
+// No se necesita Bedrock
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
 const BASE_URL = 'https://gamedistribution.com';
 const LIST_PAGE_URL = `${BASE_URL}/games`;
-
+// Función helper para añadir pausas
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * [INTERNO] Función de trabajo pesado para UN solo juego.
- * Esta función será llamada en paralelo.
+ * (Esta función ya no se exporta, se usa internamente)
  */
-async function _processGame(link) {
-    const gameSlug = link.split('/')[2];
+async function _processGame(link, gameSlug) {
     const detailUrl = `${BASE_URL}${link}`;
     const scraperApiKey = process.env.SCRAPER_API_KEY;
-
-    // Filtramos URLs inválidas (como las de 'collectionID')
-    if (!gameSlug || link.includes('?collectionID=')) {
-        console.warn(`[OMITIENDO] URL inválida o de colección: ${link}`);
-        return null; // Devolvemos null para que sea filtrado
-    }
 
     try {
         // FASE 4A: Scrapear la página de detalle (¡Con renderizado!)
@@ -31,33 +25,67 @@ async function _processGame(link) {
         const detailResponse = await axios.get(scraperDetailUrl, { timeout: 30000 }); 
         const $$ = cheerio.load(detailResponse.data);
 
-        // --- ¡¡FASE 4B: LA NUEVA LÓGICA (EXTRAER JSON)!! ---
+        // Variables para guardar los datos
+        let title, embedUrl, thumbnailUrl, category, shortDescription;
+
+        // --- FASE 4B: LÓGICA HÍBRIDA (INTELIGENTE) ---
+
+        // --- INTENTO 1: Método JSON (El mejor) ---
         const jsonData = $$('script[id="__NEXT_DATA__"]').html();
-        if (!jsonData) {
-            console.error(`[FALLO JSON] No se encontró <script id="__NEXT_DATA__"> en ${detailUrl}`);
+        if (jsonData) {
+            try {
+                const data = JSON.parse(jsonData);
+                const gameData = data.props.pageProps.game;
+
+                if (gameData && gameData.url && gameData.title) {
+                    title = gameData.title;
+                    embedUrl = gameData.url;
+                    thumbnailUrl = gameData.assets.cover;
+                    category = gameData.categories[0] || 'general';
+                    shortDescription = gameData.description;
+                    console.log(`[ÉXITO JSON] Datos extraídos para: ${title}`);
+                }
+            } catch (e) {
+                console.warn(`[AVISO] JSON corrupto en ${detailUrl}. Usando fallback.`);
+            }
+        }
+
+        // --- INTENTO 2: Método HTML (Fallback) ---
+        // Si el JSON falló, usamos tu idea de rellenar con lo que podamos
+        
+        if (!embedUrl) {
+            // Si el JSON falló, buscamos el iframe en el HTML
+            const embedText = $$("*:contains('<iframe src=\"https://html5.gamedistribution.com')").text();
+            if (embedText) {
+                const match = embedText.match(/src="([^"]+)"/);
+                if (match && match[1]) {
+                    embedUrl = match[1];
+                }
+            }
+        }
+
+        // Verificación final: Si NO hay URL de embed, el juego no sirve.
+        if (!embedUrl) {
+            console.error(`[FALLO FATAL] No se pudo encontrar embedUrl (ni JSON ni HTML) para ${detailUrl}.`);
             return null;
         }
-        
-        const data = JSON.parse(jsonData);
-        const gameData = data.props.pageProps.game;
 
-        if (!gameData || !gameData.url || !gameData.title) {
-             console.error(`[FALLO JSON] JSON incompleto o estructura cambiada en ${detailUrl}`);
-             return null;
+        // Si no tenemos título (del JSON), usamos el slug
+        if (!title) {
+            title = gameSlug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
         }
         
-        // --- Extraemos los datos de forma 100% fiable ---
-        const title = gameData.title;
-        const embedUrl = gameData.url; // Esta es la URL del iframe
-        const thumbnailUrl = gameData.assets.cover; // ¡AQUÍ ESTÁ LA IMAGEN!
-        const category = gameData.categories[0] || 'general'; // ¡AQUÍ ESTÁ LA CATEGORÍA!
-        const shortDescription = gameData.description; // La descripción corta
+        // Si no tenemos el resto (del JSON), lo buscamos en meta tags
+        if (!thumbnailUrl) {
+            thumbnailUrl = $$('meta[property="og:image"]').attr('content') || '';
+        }
+        if (!category) {
+            category = 'general';
+        }
+        if (!shortDescription) {
+            shortDescription = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
+        }
         
-        // --- FASE 4C: IA (DESACTIVADA) ---
-        // (No hay llamada a la IA)
-
-        console.log(`[ÉXITO] Datos extraídos para: ${title}. (Cat: ${category})`);
-
         // Devolvemos el objeto listo para 'bulkWrite'
         return {
             updateOne: {
@@ -66,10 +94,10 @@ async function _processGame(link) {
                     $set: {
                         title: title,
                         slug: gameSlug,
-                        description: shortDescription, // <-- Usamos la descripción corta
+                        description: shortDescription,
                         category: category,
                         thumbnailUrl: thumbnailUrl,
-                        embedUrl: embedUrl.split('?')[0], // Limpiamos la URL del iframe
+                        embedUrl: embedUrl.split('?')[0],
                         source: 'GameDistribution'
                     }
                 },
@@ -79,7 +107,7 @@ async function _processGame(link) {
 
     } catch (err) {
         console.error(`Error fatal procesando ${detailUrl}: ${err.message}`);
-        return null; // Devolvemos null si hay un error
+        return null;
     }
 }
 
@@ -90,7 +118,7 @@ async function _processGame(link) {
  */
 exports.syncGames = async (req, res) => {
     res.json({
-        message: "¡Robot iniciado! El trabajo de scraping (Modo Rápido y SIN IA) ha comenzado."
+        message: "¡Robot iniciado! El trabajo de scraping (Modo Lento y Seguro) ha comenzado."
     });
     _runSyncJob(); 
 };
@@ -98,7 +126,6 @@ exports.syncGames = async (req, res) => {
 
 /**
  * [INTERNO] Esta es la función de trabajo pesado.
- * (Ahora es mucho más rápida)
  */
 async function _runSyncJob() {
     console.log(`--- INICIANDO SYNC DE JUEGOS (IA DESACTIVADA) ---`);
@@ -160,17 +187,33 @@ async function _runSyncJob() {
         return; 
     }
 
-    // --- FASE 4: SCRAPING (¡¡EN PARALELO!!) ---
-    console.log(`Iniciando scrapeo de detalles para ${newGameLinks.length} juegos... (Modo Paralelo y SIN IA)`);
+    // --- FASE 4: SCRAPING (¡¡EN SERIE: LENTO Y SEGURO!!) ---
+    console.log(`Iniciando scrapeo de detalles para ${newGameLinks.length} juegos... (Modo Lento y Seguro)`);
     
-    // Creamos un array de promesas, una por cada juego
-    const gamePromises = newGameLinks.map(_processGame);
-    
-    // Esperamos a que TODAS las promesas terminen
-    const results = await Promise.all(gamePromises);
+    let operations = [];
 
-    // Filtramos los resultados que fallaron (los que devolvieron 'null')
-    const operations = results.filter(Boolean); // 'Boolean' filtra 'null' y 'undefined'
+    // Usamos un bucle 'for...of' para ir UNO POR UNO
+    for (const link of newGameLinks) {
+        
+        const gameSlug = link.split('/')[2];
+        
+        // Filtramos URLs inválidas (como las de 'collectionID')
+        if (!gameSlug || link.includes('?collectionID=')) {
+            console.warn(`[OMITIENDO] URL inválida o de colección: ${link}`);
+            continue;
+        }
+
+        console.log(`Procesando juego: ${gameSlug}...`);
+        const result = await _processGame(link, gameSlug);
+
+        if (result) {
+            operations.push(result);
+        }
+
+        // --- ¡¡LA CLAVE PARA EVITAR EL 429!! ---
+        // Pausamos 3 segundos ANTES de pedir el siguiente juego.
+        await sleep(3000); 
+    }
 
     // --- FASE 5: GUARDAR EN LA BASE DE DATOS ---
     if (operations.length > 0) {
@@ -183,7 +226,7 @@ async function _runSyncJob() {
             totalEncontrados: gameLinks.length,
             totalNuevos: newGameLinks.length,
             totalGuardadosEnDB: result.upsertedCount,
-            totalFallidos: newGameLinks.length - operations.length
+            totalFallidos: newGameLinks.length - operations.length - (gameLinks.length - newGameLinks.length) // Ajustamos el conteo de fallidos
         });
     } else {
         console.log("Se encontraron juegos nuevos, pero hubo un error al extraer detalles para TODOS ellos.");
