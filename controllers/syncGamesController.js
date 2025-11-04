@@ -19,8 +19,7 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     try {
-        // FASE A: Scrapear la página de detalle (¡Con renderizado!)
-        // *** ¡AUMENTADO EL WAIT A 10 SEGUNDOS para evitar splash screen! ***
+        // FASE A: Scrapear la página de detalle (¡Con renderizado y 10 segundos de espera!)
         const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=10000`;
         
         // Timeout de 60 segundos
@@ -31,7 +30,6 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
         let title, embedUrl, thumbnailUrl, category, description;
         let languages = [], genders = [], ageGroups = [];
         
-        // Usamos la imagen de la lista como primera opción (es la que ve el usuario)
         thumbnailUrl = initialImageUrl; 
         const sourceUrl = detailUrl;    
 
@@ -45,7 +43,6 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
                 if (gameData && gameData.url && gameData.title) {
                     title = gameData.title;
                     embedUrl = gameData.url;
-                    // Sobrescribir la imagen SOLO si encontramos una de mejor calidad
                     if (gameData.assets && gameData.assets.cover) {
                         thumbnailUrl = gameData.assets.cover;
                     }
@@ -113,7 +110,7 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
             slug: gameSlug,
             description: description,
             category: category,
-            thumbnailUrl: thumbnailUrl, // La imagen que teníamos
+            thumbnailUrl: thumbnailUrl, 
             embedUrl: embedUrl.split('?')[0],
             source: 'GameDistribution',
             sourceUrl: sourceUrl,
@@ -122,17 +119,29 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
             ageGroups: ageGroups
         };
         
-        // --- FASE C: Encontrar Juegos Recomendados (Tu nueva lógica) ---
-        const recommendedItems = []; // Array de { slug, imageUrl }
+        // --- FASE C: Encontrar Juegos Recomendados (LÓGICA MEJORADA) ---
+        const recommendedItems = []; 
+        let recommendedSectionFound = false;
         
-        const recommendedSection = $$("h2:contains('Recommended')").parent();
-        
-        if (recommendedSection.length) {
-            recommendedSection.find('a[href^="/games/"]').each((i, el) => {
-                const link = $$(el).attr('href');
-                const imageUrl = $$(el).find('img').attr('src'); // Capturar imagen del recomendado
+        // Intento 1: Buscar por "Recommended"
+        let section = $$("h2:contains('Recommended')").parent();
+        if (section.length) {
+            recommendedSectionFound = true;
+        }
 
-                // Ignorar enlaces inválidos (que contengan "?") y asegurar que tengan imagen
+        // Intento 2: Buscar por "Similar" (o el h2 más cercano)
+        if (!section.length) {
+            section = $$("h2:contains('Similar')").parent();
+            if (section.length) {
+                recommendedSectionFound = true;
+            }
+        }
+
+        if (recommendedSectionFound) {
+            section.find('a[href^="/games/"]').each((i, el) => {
+                const link = $$(el).attr('href');
+                const imageUrl = $$(el).find('img').attr('src'); 
+
                 if (link && !link.includes('?') && imageUrl) { 
                     const slug = link.split('/')[2];
                     if (slug && slug !== gameSlug) {
@@ -140,12 +149,32 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
                     }
                 }
             });
-        } else {
-             console.warn(`[AVISO] No se encontró la sección "Recommended" en ${detailUrl}.`);
+        } 
+        
+        // *** FALLBACK AGRESIVO: Si no encontramos la sección por el título ***
+        if (!recommendedSectionFound) {
+             console.warn(`[FALLBACK AGRESIVO] No se encontró la sección 'Recommended' ni 'Similar' en ${detailUrl}. Buscando todos los enlaces válidos en la página.`);
+             
+             $$('a[href^="/games/"]').each((i, el) => {
+                const link = $$(el).attr('href');
+                const imageUrl = $$(el).find('img').attr('src');
+
+                // Ignorar enlaces inválidos (con "?") y el enlace del juego principal.
+                if (link && !link.includes('?') && imageUrl) { 
+                    const slug = link.split('/')[2];
+                    if (slug && slug !== gameSlug) {
+                        recommendedItems.push({ slug: slug, imageUrl: imageUrl });
+                    }
+                }
+            });
         }
         
         // De-duplicar los items de *esta* página antes de devolverlos
         const uniqueRecommended = Array.from(new Map(recommendedItems.map(item => [item.slug, item])).values());
+
+        if (uniqueRecommended.length === 0) {
+            console.log(`-> No se encontraron juegos recomendados/similares válidos para ${gameSlug}.`);
+        }
 
         // Devolvemos el objeto de datos y la lista de nuevos slugs
         return {
@@ -162,7 +191,6 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
 
 /**
  * [PRIVADO] Esta es la función que llama el usuario.
- * Solo "activa" el robot y responde inmediatamente.
  */
 exports.syncGames = async (req, res) => {
     res.json({
@@ -203,7 +231,6 @@ async function _runSyncJob() {
 
         // --- FASE 2: "SEMILLA" (Seed) - Obtener la primera página para empezar ---
         console.log("Obteniendo la página principal para la 'semilla' inicial...");
-        // *** ¡AUMENTADO EL WAIT A 10 SEGUNDOS para evitar splash screen! ***
         const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(START_PAGE)}&render=true&wait=10000`;
         
         const response = await axios.get(scraperUrl, { timeout: 90000 }); 
@@ -230,14 +257,13 @@ async function _runSyncJob() {
         
         
         if (queue.length === 0) {
-            // *** ¡AQUÍ ESTÁ EL FALLBACK QUE PEDISTE! ***
-            // Si no se encontraron juegos NUEVOS en la página principal (pero sí hay juegos existentes)
+            // *** FALLBACK: Si no hay juegos NUEVOS, elegimos uno EXISTENTE para empezar a rastrear ***
             if (existingGames.length > 0) {
                 // 1. Seleccionar un juego ALEATORIO de los que ya tenemos en la DB.
                 const randomIndex = Math.floor(Math.random() * existingGames.length);
                 const randomGame = existingGames[randomIndex];
 
-                // 2. Añadirlo a la cola. El bot entrará a este juego, encontrará los recomendados y seguirá.
+                // 2. Añadirlo a la cola.
                 queue.push({ slug: randomGame.slug, imageUrl: null }); 
 
                 console.log(`\n[FALLBACK] La cola de nuevos juegos estaba vacía. Seleccionando un juego EXISTENTE (${randomGame.slug}) para buscar nuevas recomendaciones.`);
