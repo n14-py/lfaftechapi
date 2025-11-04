@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 const whiteList = [
     'http://127.0.0.1:5500',  // Tu localhost (IP)
     'http://localhost:5500',   // Tu localhost (Nombre)
-    
+    'http://127.0.0.1:5501',
     // --- SITIOS EXISTENTES ---
     'https://www.noticias.lat', // Tu sitio de noticias en Vercel
     'https://noticias.lat',
