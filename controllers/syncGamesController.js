@@ -4,38 +4,114 @@ const Game = require('../models/game');
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
 const BASE_URL = 'https://gamedistribution.com';
-const LIST_PAGE_URL = `${BASE_URL}/games`; // URL solo para encontrar el Build ID
+const START_PAGE = `${BASE_URL}/games`; // Página inicial para "sembrar" la araña
 
 // Función helper para añadir pausas (¡LA CLAVE ANTI-BLOQUEO!)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-
 /**
- * [INTERNO] Paso 1: Llama a la página principal UNA VEZ para encontrar el "Build ID"
- * necesario para llamar a la API interna.
+ * [INTERNO] Función de trabajo pesado para UN solo juego.
+ * Esta es la parte "inteligente":
+ * 1. Procesa y guarda el juego.
+ * 2. Devuelve los links "recomendados" que encuentra.
  */
-async function _findBuildId(scraperApiKey) {
-    try {
-        console.log("Buscando Build ID para la API interna...");
-        // NO necesitamos render=true, el ID está en el HTML inicial
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(LIST_PAGE_URL)}&render=false`;
-        
-        const response = await axios.get(scraperUrl, { timeout: 60000 });
-        const $ = cheerio.load(response.data);
+async function _processGameDetailAndFindMore(link, gameSlug, initialImageUrl) {
+    const detailUrl = `${BASE_URL}${link}`;
+    const scraperApiKey = process.env.SCRAPER_API_KEY;
 
-        const jsonData = $('script[id="__NEXT_DATA__"]').html();
-        const data = JSON.parse(jsonData);
+    try {
+        // FASE 4A: Scrapear la página de detalle (¡Con renderizado!)
+        // ¡¡AUMENTAMOS EL TIEMPO DE ESPERA A 10 SEGUNDOS para cargar el JSON!!
+        const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=10000`;
         
-        if (!data.buildId) {
-            throw new Error("No se pudo encontrar el 'buildId' en __NEXT_DATA__.");
+        // Timeout de 90 segundos (para darle margen a la espera de 10s)
+        const detailResponse = await axios.get(scraperDetailUrl, { timeout: 90000 }); 
+        const $$ = cheerio.load(detailResponse.data);
+
+        // Variables para guardar los datos
+        let title, embedUrl, thumbnailUrl, category, description;
+        let languages = [], genders = [], ageGroups = [];
+        
+        thumbnailUrl = initialImageUrl; 
+        const sourceUrl = detailUrl;    
+
+        // --- FASE 4B: LÓGICA HÍBRIDA (INTELIGENTE) ---
+
+        // --- INTENTO 1: Método JSON (El mejor) ---
+        const jsonData = $$('script[id="__NEXT_DATA__"]').html();
+        if (jsonData) {
+            try {
+                const data = JSON.parse(jsonData);
+                const gameData = data.props.pageProps.game;
+
+                if (gameData && gameData.url && gameData.title) {
+                    title = gameData.title;
+                    embedUrl = gameData.url;
+                    if (gameData.assets && gameData.assets.cover) {
+                        thumbnailUrl = gameData.assets.cover;
+                    }
+                    category = gameData.categories[0] || 'general'; // ¡CATEGORÍA REAL!
+                    description = gameData.description; // ¡DESCRIPCIÓN REAL!
+                    languages = gameData.languages || [];
+                    genders = gameData.genders || [];
+                    ageGroups = gameData.ageGroups || [];
+                    
+                    console.log(`[ÉXITO JSON] Datos extraídos para: ${title} (Cat: ${category})`);
+                }
+            } catch (e) {
+                console.warn(`[AVISO] JSON corrupto en ${detailUrl}. Usando fallback HTML.`);
+            }
+        }
+
+        // --- INTENTO 2: Método HTML (Fallback o "Recuperación") ---
+        
+        if (!embedUrl) {
+            const embedText = $$("*:contains('<iframe src=\"https://html5.gamedistribution.com')").text();
+            const match = embedText ? embedText.match(/src="([^"]+)"/) : null;
+            if (match && match[1]) {
+                embedUrl = match[1];
+                console.log(`[FALLBACK] embedUrl encontrado en HTML.`);
+            } else {
+                 throw new Error(`[FALLO FATAL] No se pudo encontrar embedUrl (ni JSON ni HTML).`);
+            }
+        }
+
+        if (!title) {
+            title = gameSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
         
-        console.log(`Build ID encontrado: ${data.buildId}`);
-        return data.buildId;
+        if (!category) {
+            category = 'general';
+        }
 
-    } catch (error) {
-        console.error(`Error fatal encontrando el Build ID: ${error.message}`);
-        return null;
+        if (!description) {
+            let descNode = $$("h2:contains('DESCRIPTION')").next();
+            if (!descNode.length) descNode = $$("h2:contains('DESCRIPCIÓN')").next();
+            
+            if (descNode.is('p')) {
+                description = descNode.text();
+                console.log(`[FALLBACK] Descripción real (HTML) encontrada.`);
+            } else {
+                description = null; // ¡NO MÁS "19,000 games"!
+            }
+        }
+        
+        // ¡Devolvemos el objeto de datos completo!
+        const gameDataToSave = {
+            title, slug: gameSlug, description, category, thumbnailUrl, 
+            embedUrl: embedUrl.split('?')[0], source: 'GameDistribution',
+            sourceUrl, languages, genders, ageGroups
+        };
+        
+        // --- ¡¡GUARDADO 1 POR 1!! ---
+        await Game.updateOne({ slug: gameSlug }, { $set: gameDataToSave }, { upsert: true });
+        console.log(`[ÉXITO] Juego guardado: ${title}`);
+        
+        // Devolvemos el HTML de esta página para que la araña busque links
+        return $$; 
+
+    } catch (err) {
+        throw new Error(`Error procesando ${detailUrl}: ${err.message}`);
     }
 }
 
@@ -46,7 +122,7 @@ async function _findBuildId(scraperApiKey) {
  */
 exports.syncGames = async (req, res) => {
     res.json({
-        message: "¡Robot PODEROSO iniciado! El trabajo de scraping (Modo API Secreta 1-por-1) ha comenzado. Esto puede tardar horas."
+        message: "¡Robot ARAÑA iniciado! El trabajo de scraping (Modo Sin Parar 1-por-1) ha comenzado. Esto puede tardar horas."
     });
     // ¡Llama al robot real SIN await para que se ejecute en segundo plano!
     _runSyncJob(); 
@@ -55,10 +131,10 @@ exports.syncGames = async (req, res) => {
 
 /**
  * [INTERNO] Esta es la función de trabajo pesado.
- * ¡¡AHORA CONTIENE EL BUCLE DE PAGINACIÓN DE LA API!!
+ * ¡¡ESTE ES EL NUEVO BOT "ARAÑA"!!
  */
 async function _runSyncJob() {
-    console.log(`--- INICIANDO SYNC DE JUEGOS (MODO API SECRETA) ---`);
+    console.log(`--- INICIANDO SYNC DE JUEGOS (MODO ARAÑA 1-por-1) ---`);
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     if (!scraperApiKey) {
@@ -66,128 +142,117 @@ async function _runSyncJob() {
         return; 
     }
 
-    // --- FASE 1: OBTENER EL BUILD ID (1 sola vez) ---
-    // (1 crédito de API usado)
-    const buildId = await _findBuildId(scraperApiKey);
-    if (!buildId) {
-        console.error("No se puede continuar sin un Build ID. Deteniendo el bot.");
-        return;
-    }
+    // --- FASE 1: INICIALIZAR LA "COLA" Y "VISITADOS" ---
+    // gameQueue: La lista "infinita" de juegos por procesar
+    let gameQueue = []; 
+    // visitedSlugs: Set para no procesar el mismo juego dos veces
+    let visitedSlugs = new Set(); 
 
-    let page = 1;
-    let keepRunning = true;
     let totalJuegosGuardados = 0;
     let totalJuegosFallidos = 0;
 
-    // --- ¡¡EL BUCLE "SIN PARAR"!! ---
-    while (keepRunning) {
-        console.log(`\n--- PROCESANDO PÁGINA DE API: ${page} ---`);
-        let gamesOnThisPage = []; // Lista de juegos del JSON
+    try {
+        // --- FASE 2: "SEMBRAR" LA COLA (LLAMADA INICIAL) ---
+        // (1 crédito usado)
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(START_PAGE)}&render=true&wait=5000`;
+        console.log(`Llamando a ScraperAPI para sembrar la cola desde: ${START_PAGE}`);
         
+        const response = await axios.get(scraperUrl, { timeout: 90000 }); 
+        const $ = cheerio.load(response.data);
+
+        // Buscamos los juegos en la página inicial
+        $('a[href^="/games/"]').each((i, el) => {
+            const link = $(el).attr('href');
+            const slug = link ? link.split('/')[2] : null;
+
+            if (!slug || link.includes('?collectionID=') || link === '/games') {
+                return;
+            }
+            
+            const imageUrl = $(el).find('img').attr('src');
+            
+            // ¡COMO PEDISTE! Guardamos link e imagen
+            if (imageUrl && !visitedSlugs.has(slug)) {
+                gameQueue.push({ link, imageUrl, slug });
+                visitedSlugs.add(slug);
+            }
+        });
+
+        console.log(`Cola inicial sembrada con ${gameQueue.length} juegos.`);
+        if (gameQueue.length === 0) {
+            throw new Error("No se encontraron juegos en la página inicial. Los selectores pueden estar rotos.");
+        }
+        
+        // --- REVISAMOS LA BASE DE DATOS UNA SOLA VEZ AL INICIO ---
+        const allInitialSlugs = gameQueue.map(g => g.slug);
+        const existingGames = await Game.find({ slug: { $in: allInitialSlugs } }).select('slug');
+        const existingSlugs = new Set(existingGames.map(g => g.slug));
+        
+        // Filtramos la cola inicial para no procesar juegos que ya tenemos
+        gameQueue = gameQueue.filter(g => !existingSlugs.has(g.slug));
+        
+        // Añadimos los que ya existen a "visitados" para no volver a procesarlos
+        existingSlugs.forEach(slug => visitedSlugs.add(slug));
+        
+        console.log(`De la siembra inicial, ${gameQueue.length} juegos son NUEVOS y se van a procesar.`);
+
+    } catch (error) {
+        console.error(`Error fatal al sembrar la cola: ${error.message}`);
+        return;
+    }
+
+    // --- FASE 3: EL BUCLE "SIN PARAR" (MIENTRAS HAYA JUEGOS EN LA COLA) ---
+    while (gameQueue.length > 0) {
+        
+        // 1. Sacamos el próximo juego de la cola
+        const currentGame = gameQueue.shift(); // Saca el *primero* de la lista
+        const gameSlug = currentGame.slug;
+
+        console.log(`\nProcesando juego: ${gameSlug}... (Juegos restantes en cola: ${gameQueue.length})`);
+
         try {
-            // --- FASE 2: LLAMAR A LA API DE DATOS INTERNA ---
-            // ¡Esta es la URL real que usa la página!
-            const apiUrl = `${BASE_URL}/_next/data/${buildId}/games.json?page=${page}`;
+            // ¡LA PAUSA ANTI-BLOQUEO!
+            console.log(`(Pausando 7 segundos para evitar bloqueo y esperar JS...)`);
+            await sleep(7000); 
+
+            // 2. PROCESAR, GUARDAR, Y OBTENER EL HTML DE VUELTA
+            // _processGameDetail ahora guarda en la DB y devuelve el HTML ($$)
+            const $$_detailPage = await _processGameDetail(currentGame.link, gameSlug, currentGame.imageUrl);
             
-            // Usamos ScraperAPI para llamar a esta API, ya que puede estar protegida
-            // NO necesitamos render=true, es un JSON.
-            const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(apiUrl)}&render=false`;
-            
-            console.log(`Llamando a la API de datos para la página ${page}...`);
-            // (1 crédito de API usado por página)
-            const response = await axios.get(scraperUrl, { timeout: 60000 }); 
-            
-            const jsonData = response.data;
-            
-            // La lista de juegos está en esta ruta
-            gamesOnThisPage = jsonData.pageProps.games.items;
+            totalJuegosGuardados++;
 
-            // --- CONDICIÓN DE PARADA 1 ---
-            if (!gamesOnThisPage || gamesOnThisPage.length === 0) {
-                console.log(`Página de API ${page} está vacía. ¡TODOS LOS JUEGOS HAN SIDO REVISADOS! Deteniendo el bot.`);
-                keepRunning = false;
-                break;
-            }
+            // --- 3. ¡LA MAGIA! BUSCAR RECOMENDADOS Y AÑADIR A LA COLA ---
+            $$_detailPage('a[href^="/games/"]').each((i, el) => {
+                const newLink = $(el).attr('href');
+                const newSlug = newLink ? newLink.split('/')[2] : null;
 
-            console.log(`Página ${page}: Encontrados ${gamesOnThisPage.length} juegos en la API.`);
-
-            // --- FASE 3: DE-DUPLICACIÓN (Ahorro de créditos) ---
-            const allSlugs = gamesOnThisPage.map(g => g.slug).filter(Boolean); 
-            const existingGames = await Game.find({ slug: { $in: allSlugs } }).select('slug');
-            const existingSlugs = new Set(existingGames.map(g => g.slug));
-            
-            const newGamesToProcess = gamesOnThisPage.filter(g => g.slug && !existingSlugs.has(g.slug));
-
-            console.log(`De ${gamesOnThisPage.length} juegos, ${newGamesToProcess.length} son NUEVOS.`);
-
-            if (newGamesToProcess.length === 0) {
-                console.log("No se encontraron juegos nuevos en esta página. Probando siguiente página...");
-                page++;
-                await sleep(3000); // Pausa entre páginas
-                continue; // Salta al siguiente ciclo del 'while'
-            }
-
-            // --- FASE 4: GUARDAR (¡¡UNO POR UNO!!) ---
-            console.log(`Iniciando guardado de ${newGamesToProcess.length} juegos nuevos...`);
-            
-            for (const gameData of newGamesToProcess) {
-                try {
-                    // ¡No necesitamos "procesar" nada, ya tenemos todos los datos!
-                    const gameToSave = {
-                        title: gameData.title,
-                        slug: gameData.slug,
-                        description: gameData.description, // ¡DESCRIPCIÓN REAL!
-                        category: gameData.categories[0] || 'general', // ¡CATEGORÍA REAL!
-                        thumbnailUrl: gameData.assets.cover, // ¡IMAGEN REAL!
-                        embedUrl: gameData.url.split('?')[0], // ¡EMBED REAL!
-                        source: 'GameDistribution',
-                        sourceUrl: `${BASE_URL}/games/${gameData.slug}/`, // URL Privada
-                        languages: gameData.languages || [],
-                        genders: gameData.genders || [],
-                        ageGroups: gameData.ageGroups || []
-                    };
-                    
-                    // 2. ¡GUARDAMOS ESTE JUEGO INMEDIATAMENTE!
-                    await Game.updateOne(
-                        { slug: gameData.slug }, // El filtro
-                        { $set: gameToSave },   // Los datos a guardar
-                        { upsert: true }        // Si no existe, lo crea
-                    );
-
-                    console.log(`[ÉXITO] Juego guardado: ${gameToSave.title}`);
-                    totalJuegosGuardados++;
-                    await sleep(500); // Pequeña pausa entre guardados
-
-                } catch (error) {
-                    console.error(`[FALLO AL GUARDAR] No se pudo guardar ${gameData.slug}: ${error.message}`);
-                    totalJuegosFallidos++;
+                // Si es un link de juego, no es el juego actual, y NO lo hemos visitado...
+                if (newSlug && newSlug !== gameSlug && !visitedSlugs.has(newSlug)) {
+                    const newImageUrl = $(el).find('img').attr('src');
+                    if (newImageUrl) {
+                        gameQueue.push({ link: newLink, imageUrl: newImageUrl, slug: newSlug }); // Añade al final de la cola
+                        visitedSlugs.add(newSlug); // Marca como "ya en la cola"
+                        console.log(`[+] Araña encontró: ${newSlug} (Cola ahora: ${gameQueue.length})`);
+                    }
                 }
-            } // Fin del bucle de juegos
-
-            page++; // Preparamos la siguiente página
-            console.log("Pausa de 5 segundos entre páginas...");
-            await sleep(5000); // Pausa larga entre páginas
+            });
 
         } catch (error) {
-            // --- CONDICIÓN DE PARADA 2 (Error fatal) ---
-            console.error(`Error fatal al procesar la API de la PÁGINA ${page}: ${error.message}`);
-            if (error.message.includes('404')) {
-                console.log("Error 404: No hay más páginas de API. Deteniendo el bot.");
-            }
+            console.error(`[FALLO] No se pudo procesar ${gameSlug}: ${error.message}`);
+            totalJuegosFallidos++;
             if (error.message.includes('401') || error.message.includes('403') || error.message.includes('429')) {
                 console.error("¡¡CRÉDITOS AGOTADOS O BLOQUEADO!! Deteniendo el bot.");
+                break; // Sale del bucle 'while'
             }
-            keepRunning = false;
         }
+    } // Fin del bucle 'while(gameQueue.length > 0)'
 
-    } // Fin del bucle 'while(keepRunning)'
-
-    // --- FASE 5: REPORTE FINAL ---
-    console.log(`--- ¡SINCRONIZACIÓN "SIN PARAR" COMPLETADA! ---`);
+    // --- FASE 4: REPORTE FINAL ---
+    console.log(`--- ¡SINCRONIZACIÓN "ARAÑA" COMPLETADA! ---`);
     console.log({
-        message: "El bot ha terminado de ejecutarse.",
-        totalPaginasProcesadas: page - 1,
+        message: "El bot ha terminado de ejecutarse (Cola vacía o error fatal).",
         totalJuegosGuardadosEnDB: totalJuegosGuardados,
-        totalJuegosFallidos: totalJuegosFallidos
+        totalJuegosFallidos: totalJuegosFallidos,
+        totalJuegosDescubiertos: visitedSlugs.size
     });
 };
