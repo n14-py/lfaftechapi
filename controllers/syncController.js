@@ -43,6 +43,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * Llama a la API de DeepSeek.
  * --- ¡VERSIÓN ACTUALIZADA (PLAN D)! ---
  * --- ¡USA URL PERO PIDE TEXTO PLANO CON FORMATO ESTRICTO! ---
+ * (Esta función no cambia)
  */
 async function getAIArticle(articleUrl, apiKey) {
     if (!articleUrl || !articleUrl.startsWith('http')) return null;
@@ -139,7 +140,7 @@ URL: ${articleUrl}`;
 
 /**
  * [PRIVADO] Sincronizar Noticias
- * * --- ¡VERSIÓN DOBLE BUCLE (CON CLASIFICACIÓN IA SIN JSON)! ---
+ * --- ¡VERSIÓN OPTIMIZADA CON AHORRO DE CRÉDITOS! ---
  */
 exports.syncGNews = async (req, res) => {
     try {
@@ -149,10 +150,10 @@ exports.syncGNews = async (req, res) => {
         if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
             return res.status(500).json({ error: "Faltan GNEWS_API_KEY o NEWSDATA_API_KEY en el .env" });
         }
-        console.log(`Iniciando sync DOBLE BUCLE con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
+        console.log(`Iniciando sync OPTIMIZADO con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
         let erroresFetch = [];
-        let articulosParaIA = [];
+        let articulosParaIA = []; // Esta es la lista total de APIs
         let totalObtenidosNewsData = 0;
         let totalObtenidosGNews = 0;
         
@@ -225,14 +226,33 @@ exports.syncGNews = async (req, res) => {
             await sleep(1000);
         }
         console.log(`-> Total Obtenidos GNews: ${totalObtenidosGNews}.`);
+        console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos de las APIs.`);
 
-        console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos para procesar.`);
-
-
-        // --- PASO 3: IA (CLASIFICACIÓN Y GENERACIÓN) ---
-        console.log(`Paso 3: Iniciando generación y CLASIFICACIÓN de IA para ${articulosParaIA.length} artículos...`);
+        // --- ¡¡NUEVO PASO 3: DE-DUPLICACIÓN!! ---
+        // Antes de gastar en IA, vemos cuáles ya tenemos
+        console.log(`Paso 3: Verificando duplicados contra la base de datos...`);
         
-        const promesasDeArticulos = articulosParaIA.map((article, index) => {
+        // 3a. Sacamos todas las URLs que recibimos
+        const urlsRecibidas = articulosParaIA.map(article => article.url);
+        
+        // 3b. Buscamos en la DB solo las URLs que coincidan (y solo traemos el enlace)
+        const articulosExistentes = await Article.find({ 
+            enlaceOriginal: { $in: urlsRecibidas } 
+        }).select('enlaceOriginal'); // .select() lo hace súper rápido
+
+        // 3c. Creamos un Set (un objeto de búsqueda rápida) con las URLs que YA TENEMOS
+        const urlsExistentes = new Set(articulosExistentes.map(a => a.enlaceOriginal));
+
+        // 3d. Filtramos la lista, quedándonos SÓLO con los artículos que NO ESTÁN en el Set
+        const articulosNuevosParaIA = articulosParaIA.filter(article => !urlsExistentes.has(article.url));
+        
+        console.log(`-> ${urlsExistentes.size} artículos ya existen. ${articulosNuevosParaIA.length} artículos son NUEVOS y se enviarán a la IA.`);
+
+        // --- PASO 4: IA (CLASIFICACIÓN Y GENERACIÓN) ---
+        console.log(`Paso 4: Iniciando generación de IA para ${articulosNuevosParaIA.length} artículos...`);
+        
+        // ¡¡IMPORTANTE: Ahora mapeamos la lista FILTRADA!!
+        const promesasDeArticulos = articulosNuevosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
             
             // ¡Llamamos a la nueva función de parseo de texto!
@@ -250,7 +270,7 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> ${articulosValidosIA.length} artículos procesados y clasificados por IA.`);
 
 
-        // --- PASO 4: Base de Datos ---
+        // --- PASO 5: Base de Datos ---
         const operations = articulosValidosIA.map(article => ({
             updateOne: {
                 filter: { enlaceOriginal: article.url }, 
@@ -272,31 +292,32 @@ exports.syncGNews = async (req, res) => {
             }
         }));
 
-        // --- PASO 5: Guardar ---
+        // --- PASO 6: Guardar ---
         let totalArticulosNuevos = 0;
         let totalArticulosActualizados = 0;
         
         if (operations.length > 0) {
-            console.log(`Paso 4: Guardando ${operations.length} artículos en la base de datos...`);
+            console.log(`Paso 5: Guardando ${operations.length} artículos NUEVOS en la base de datos...`);
             const result = await Article.bulkWrite(operations);
             totalArticulosNuevos = result.upsertedCount;
-            totalArticulosActualizados = result.modifiedCount;
+            totalArticulosActualizados = result.modifiedCount; // Este número ahora debería ser 0
         }
 
-        console.log("¡Sincronización DOBLE BUCLE (con Clasificación IA en Texto Plano) completada!");
+        console.log("¡Sincronización con AHORRO DE IA completada!");
         
-        // --- PASO 6: Respuesta (Reporte Detallado) ---
+        // --- PASO 7: Respuesta (Reporte Detallado) ---
         res.json({ 
-            message: "Sincronización DOBLE BUCLE con CLASIFICACIÓN IA (Texto Plano) completada.",
+            message: "Sincronización con AHORRO DE IA completada.",
             reporte: {
                 totalObtenidosNewsData: totalObtenidosNewsData,
                 totalObtenidosGNews: totalObtenidosGNews,
-                totalArticulos: articulosParaIA.length,
-                totalProcesadosIA: articulosValidosIA.length,
-                totalFallidosIA: articulosParaIA.length - articulosValidosIA.length,
-                totalClasificadosIA: articulosValidosIA.length,
-                nuevosArticulosGuardados: totalArticulosNuevos,
-                articulosActualizados: totalArticulosActualizados,
+                totalArticulosRecibidos: articulosParaIA.length,
+                totalArticulosYaExistentes: urlsExistentes.size,
+                totalArticulosNuevosParaIA: articulosNuevosParaIA.length,
+                totalProcesadosIA_Exitosos: articulosValidosIA.length,
+                totalFallidosIA: articulosNuevosParaIA.length - articulosValidosIA.length,
+                nuevosArticulosGuardadosEnDB: totalArticulosNuevos,
+                articulosActualizadosEnDB: totalArticulosActualizados, // ¡Esto ya no debería pasar!
                 apisConError: erroresFetch
             }
         });
@@ -311,6 +332,7 @@ exports.syncGNews = async (req, res) => {
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente
  * (Actualizado para usar la clasificación IA de Texto Plano)
+ * (Esta función no cambia)
  */
 exports.createManualArticle = async (req, res) => {
     try {
@@ -362,6 +384,7 @@ exports.createManualArticle = async (req, res) => {
 /**
  * [PÚBLICO] Generar el Sitemap.xml
  * (Se añade al final de articleController.js)
+ * (Esta función no cambia)
  */
 exports.getSitemap = async (req, res) => {
     // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web
