@@ -23,14 +23,17 @@ const GameSchema = new mongoose.Schema({
     // El sitio de donde lo scrapeamos (ej: "CrazyGames")
     source: { type: String },
     
+    // --- ¡¡LÍNEA AÑADIDA!! ---
+    // La URL original de GameDistribution (para tu referencia)
+    sourceUrl: { type: String },
+    
     // Para ordenar por popularidad o novedad
     views: { type: Number, default: 0 },
     
 }, { timestamps: true });
 
 // --- ¡La Magia del Buscador! ---
-// Creamos un índice de texto para que podamos buscar juegos por
-// título, descripción (IA) y categoría.
+// (Esto ya existía)
 GameSchema.index({ 
     title: 'text', 
     description: 'text', 
