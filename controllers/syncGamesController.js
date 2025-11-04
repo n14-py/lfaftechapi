@@ -20,7 +20,8 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
 
     try {
         // FASE A: Scrapear la página de detalle (¡Con renderizado!)
-        const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=7000`;
+        // *** ¡AUMENTADO EL WAIT A 10 SEGUNDOS para evitar splash screen! ***
+        const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=10000`;
         
         // Timeout de 60 segundos
         const detailResponse = await axios.get(scraperDetailUrl, { timeout: 60000 }); 
@@ -131,7 +132,6 @@ async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
                 const link = $$(el).attr('href');
                 const imageUrl = $$(el).find('img').attr('src'); // Capturar imagen del recomendado
 
-                // --- ¡¡EL FIX IMPORTANTE!! ---
                 // Ignorar enlaces inválidos (que contengan "?") y asegurar que tengan imagen
                 if (link && !link.includes('?') && imageUrl) { 
                     const slug = link.split('/')[2];
@@ -203,7 +203,8 @@ async function _runSyncJob() {
 
         // --- FASE 2: "SEMILLA" (Seed) - Obtener la primera página para empezar ---
         console.log("Obteniendo la página principal para la 'semilla' inicial...");
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(START_PAGE)}&render=true&wait=5000`;
+        // *** ¡AUMENTADO EL WAIT A 10 SEGUNDOS para evitar splash screen! ***
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(START_PAGE)}&render=true&wait=10000`;
         
         const response = await axios.get(scraperUrl, { timeout: 90000 }); 
         const $ = cheerio.load(response.data);
@@ -213,7 +214,6 @@ async function _runSyncJob() {
             const link = $(el).attr('href');
             const imageUrl = $(el).find('img').attr('src');
             
-            // --- ¡¡EL FIX IMPORTANTE!! ---
             // Ignorar enlaces inválidos (con "?", sin link, o sin imagen)
             if (!link || link.includes('?') || link === '/games' || !imageUrl) {
                 return;
@@ -224,19 +224,32 @@ async function _runSyncJob() {
             // Si es un slug válido y NO lo hemos procesado (ni está en la DB)
             if (slug && !processedSlugs.has(slug)) {
                 queue.push({ slug: slug, imageUrl: imageUrl });
-                processedSlugs.add(slug); // Añadir a 'processed' para no meterlo en la cola de nuevo
+                processedSlugs.add(slug); // Marcar como "visto"
             }
         });
         
-        if (queue.length === 0 && existingGames.length === 0) {
-             console.log("La página de semilla no encontró ningún juego. Revisa el scraping de la página principal.");
-             return;
-        } else if (queue.length === 0) {
-            console.log("La página de semilla no tenía juegos nuevos (ya están todos en la DB). El bot se detendrá.");
-            return;
-        }
+        
+        if (queue.length === 0) {
+            // *** ¡AQUÍ ESTÁ EL FALLBACK QUE PEDISTE! ***
+            // Si no se encontraron juegos NUEVOS en la página principal (pero sí hay juegos existentes)
+            if (existingGames.length > 0) {
+                // 1. Seleccionar un juego ALEATORIO de los que ya tenemos en la DB.
+                const randomIndex = Math.floor(Math.random() * existingGames.length);
+                const randomGame = existingGames[randomIndex];
 
-        console.log(`Semilla obtenida. ${queue.length} juegos nuevos encontrados en la página 1 para iniciar la cola.`);
+                // 2. Añadirlo a la cola. El bot entrará a este juego, encontrará los recomendados y seguirá.
+                queue.push({ slug: randomGame.slug, imageUrl: null }); 
+
+                console.log(`\n[FALLBACK] La cola de nuevos juegos estaba vacía. Seleccionando un juego EXISTENTE (${randomGame.slug}) para buscar nuevas recomendaciones.`);
+                console.log(`Ahora, la cola tiene ${queue.length} juego(s) para iniciar el rastreo.`);
+            } else {
+                // Si ni la página principal tiene juegos, ni la DB tiene juegos.
+                console.log("La página de semilla no encontró ningún juego, y la DB está vacía. Deteniendo.");
+                return;
+            }
+        } else {
+            console.log(`Semilla obtenida. ${queue.length} juegos nuevos encontrados en la página 1 para iniciar la cola.`);
+        }
 
 
         // --- FASE 3: EL BUCLE CRAWLER (Mientras haya juegos en la cola) ---
@@ -246,7 +259,7 @@ async function _runSyncJob() {
             const { slug: slugToProcess, imageUrl: initialImageUrl } = queue.shift(); 
             
             try {
-                // ¡LA PAUSA ANTI-BLOQUEO! (Aumentada a 7 segundos)
+                // ¡LA PAUSA ANTI-BLOQUEO! (7 segundos)
                 console.log(`\nJuegos restantes en cola: ${queue.length}. (Pausando 7 segundos...)`);
                 await sleep(7000); 
 
