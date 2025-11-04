@@ -29,6 +29,7 @@ const whiteList = [
     
     // --- ¡¡NUEVOS SITIOS AÑADIDOS!! ---
     'https://www.tusinitusineli.com', // Tu nuevo sitio de juegos
+    'https://tusinitusineli.vercel.app/',
     'https://tusinitusineli.com'
 ];
 
