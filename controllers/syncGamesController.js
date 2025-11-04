@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const Game = require('../models/game'); // El "molde" que creamos en el Paso 1
-const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime'); // La IA de AWS
+const Game = require('../models/game'); // El "molde" que creamos
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
 
@@ -14,27 +14,29 @@ const bedrockClient = new BedrockRuntimeClient({
         secretAccessKey: AWS_BEDROCK_SECRET_ACCESS_KEY,
     },
 });
-const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0'; 
+const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
 
-// La URL correcta
-const TARGET_URL = 'https://www.crazygames.com/new'; // Página de "Nuevos Juegos"
+// --- ¡NUEVO OBJETIVO! ---
+const BASE_URL = 'https://gamedistribution.com';
+const LIST_PAGE_URL = `${BASE_URL}/games`; // La página del catálogo de juegos
 
 
 /**
  * Función de IA: Escribe la reseña SEO para un juego.
- * (Esta es tu lógica de AWS Bedrock, adaptada para juegos)
+ * (La misma función que antes, pero le pasamos la descripción base)
  */
-async function generateGameDescription(gameTitle, gameCategory) {
-    const systemPrompt = `Eres un redactor SEO carismático para 'tusinitusineli.com'. Tu trabajo es escribir una reseña/descripción de 300-400 palabras para un juego, optimizada para SEO.
+async function generateGameDescription(gameTitle, baseDescription, gameCategory) {
+    const systemPrompt = `Eres un redactor SEO carismático para 'tusinitusineli.com'. Tu trabajo es reescribir y expandir una descripción de un juego para hacerla única, de 300-400 palabras, y optimizada para SEO.
 
 Directrices:
 1.  **Formato:** Responde ÚNICAMENTE con el artículo. Sin saludos ni "¡Claro!".
 2.  **SEO:** Incluye natural y repetidamente: "jugar ${gameTitle} gratis", "cómo jugar ${gameTitle}", "jugar online ${gameTitle}", "mejores juegos de ${gameCategory}".
-3.  **Contenido:** Describe cómo *podría* ser el juego, sus controles (puedes inventarlos, ej: "Usa WASD y el ratón"), y por qué es divertido. Hazlo sonar emocionante.`;
+3.  **Contenido:** Usa la descripción base como inspiración, pero NO la copies. Expándela, habla de los controles (invéntalos si es necesario), la emoción del juego y por qué es divertido.`;
     
-    const userPrompt = `Escribe la reseña SEO (300-400 palabras) para este juego:
+    const userPrompt = `Reescribe y expande (300-400 palabras) esta descripción para SEO:
 -   Nombre: ${gameTitle}
--   Categoría: ${gameCategory}`;
+-   Categoría: ${gameCategory}
+-   Descripción Base: "${baseDescription}"`;
 
     const payload = {
         modelId: MODEL_ID,
@@ -43,7 +45,7 @@ Directrices:
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
             max_tokens: 1024,
-            temperature: 0.7, 
+            temperature: 0.7,
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
@@ -66,114 +68,136 @@ Directrices:
     }
 }
 
-
 /**
  * [PRIVADO] Función principal del Robot
  * Se activa llamando a /api/sync-games
  */
 exports.syncGames = async (req, res) => {
     
-    console.log('--- INICIANDO SYNC DE JUEGOS AUTOMÁTICO (Intento Básico) ---');
+    console.log(`--- INICIANDO SYNC DE JUEGOS (Objetivo: GameDistribution) ---`);
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     if (!scraperApiKey) {
         return res.status(500).json({ error: "No se encontró la clave de SCRAPER_API_KEY en .env" });
     }
 
-    // --- FASE 1: SCRAPING (El Robot visita la web) ---
+    // --- FASE 1: SCRAPING (Obtener la lista de juegos) ---
     let htmlContent;
     try {
-        // --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
-        // Quitamos &render=true. Esta es la llamada más simple (y gasta 1 crédito).
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}`;
+        // Usamos la llamada simple (1 crédito)
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(LIST_PAGE_URL)}`;
         
-        console.log(`Llamando a ScraperAPI (Modo Básico) con URL: ${TARGET_URL}`);
+        console.log(`Llamando a ScraperAPI (Modo Básico) para la lista: ${LIST_PAGE_URL}`);
         
         const response = await axios.get(scraperUrl);
         htmlContent = response.data;
-        console.log(`ScraperAPI trajo el HTML de ${TARGET_URL} exitosamente.`);
+        console.log(`ScraperAPI trajo el HTML de la LISTA exitosamente.`);
     } catch (error) {
-        console.error("Error al llamar a ScraperAPI:", error.message);
+        console.error("Error al llamar a ScraperAPI (Fase 1: Lista):", error.message);
         return res.status(500).json({ error: "Fallo al scrapear la lista de juegos." });
     }
 
-    // --- FASE 2: PARSEO (El Robot lee el HTML) ---
-    const $ = cheerio.load(htmlContent);
-    let scrapedGames = [];
+    // --- FASE 2: PARSEO (Leer la lista de juegos) ---
+    let gameLinks = [];
+    try {
+        const $ = cheerio.load(htmlContent);
+        
+        // Buscamos los links que van a las páginas de juegos (ej. /games/elytra-flight)
+        // Este es un selector *estimado*
+        $('a[href^="/games/"]').each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && !gameLinks.includes(href) && href !== '/games') {
+                gameLinks.push(href);
+            }
+        });
+        
+        // Tomamos solo los primeros 20 para no gastar tantos créditos
+        gameLinks = gameLinks.slice(0, 20);
+        
+        console.log(`Scraping encontró ${gameLinks.length} links de juegos en la página.`);
+    } catch (e) {
+         console.error("Error al parsear la lista con Cheerio:", e.message);
+         return res.status(500).json({ error: "Fallo al leer el HTML de la lista." });
+    }
     
-    // Este "selector" es la clave. Le dice a Cheerio dónde buscar los juegos.
-    // (Buscamos el `div` que se ve como una tarjeta de juego y luego el link `a` dentro de él)
-    $('div[class*="game-card_card"] a').each((i, el) => {
-        const gameUrl = $(el).attr('href');
-        const img = $(el).find('img');
-        const title = img.attr('alt');
-        const thumbnailUrl = img.attr('src');
-
-        if (gameUrl && title && thumbnailUrl && gameUrl.startsWith('/game/')) {
-            const slug = gameUrl.split('/')[2]; // Saca "bullet-force" de "/game/bullet-force"
-            
-            scrapedGames.push({
-                title: title.trim(),
-                slug: slug,
-                thumbnailUrl: thumbnailUrl,
-                // Construimos la URL para embeber (como la de tu index.html)
-                embedUrl: `https://www.crazygames.com/embed/${slug}`,
-                source: 'CrazyGames.com'
-            });
-        }
-    });
-
-    console.log(`Scraping encontró ${scrapedGames.length} juegos en la página.`);
-
-    if (scrapedGames.length === 0) {
-        return res.json({ message: "Scraping no encontró juegos. El selector de Cheerio puede estar desactualizado.", totalNuevos: 0 });
+    if (gameLinks.length === 0) {
+        return res.json({ message: "Scraping no encontró links de juegos. El selector de Cheerio puede estar desactualizado.", totalNuevos: 0 });
     }
 
     // --- FASE 3: DE-DUPLICACIÓN (Ahorro de créditos) ---
-    // (Idéntico a la lógica que hicimos para noticias)
-    
-    const allSlugs = scrapedGames.map(g => g.slug);
+    const allSlugs = gameLinks.map(link => link.split('/')[2]);
     const existingGames = await Game.find({ slug: { $in: allSlugs } }).select('slug');
     const existingSlugs = new Set(existingGames.map(g => g.slug));
 
-    const newGames = scrapedGames.filter(g => !existingSlugs.has(g.slug));
+    const newGameLinks = gameLinks.filter(link => !existingSlugs.has(link.split('/')[2]));
 
-    console.log(`De ${scrapedGames.length} juegos, ${newGames.length} son NUEVOS.`);
+    console.log(`De ${gameLinks.length} juegos, ${newGameLinks.length} son NUEVOS.`);
 
-    if (newGames.length === 0) {
+    if (newGameLinks.length === 0) {
         return res.json({ message: "¡Éxito! No se encontraron juegos nuevos.", totalNuevos: 0 });
     }
 
-    // --- FASE 4: IA (El Robot escribe las reseñas) ---
+    // --- FASE 4: SCRAPING (Detalles) + IA (Reseñas) ---
     
     let operations = [];
-    for (const game of newGames) {
-        // Obtenemos la categoría (del HTML) o usamos 'general'
-        // Este es un selector de ejemplo, puede fallar si CrazyGames cambia su HTML
-        const categoryString = $(`a[href="/game/${game.slug}"]`).closest('div[class*="game-card_card"]').find('div[class*="game-card_category"]').text();
-        const category = categoryString || 'general'; // Fallback
+    console.log(`Iniciando scrapeo de detalles e IA para ${newGameLinks.length} juegos...`);
+    
+    for (const link of newGameLinks) {
+        const gameSlug = link.split('/')[2];
+        const detailUrl = `${BASE_URL}${link}`;
+        
+        try {
+            // --- FASE 4A: Scrapear la página de detalle ---
+            const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}`;
+            const detailResponse = await axios.get(scraperDetailUrl);
+            const detailHtml = detailResponse.data;
+            const $$ = cheerio.load(detailHtml);
+            
+            // --- FASE 4B: Extraer los datos (¡Usando la info que encontraste!) ---
+            
+            // 1. El Título (estimación)
+            const title = $$('h1').first().text().trim();
+            if (!title) continue; // Si no hay título, saltar
 
-        // ¡Llamamos a AWS Bedrock!
-        const description = await generateGameDescription(game.title, category);
+            // 2. La URL del Iframe (La clave)
+            const iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
+            if (!iframeSrc) continue; // Si no hay iframe, saltar
 
-        if (description) {
-            operations.push({
-                updateOne: {
-                    filter: { slug: game.slug },
-                    update: {
-                        $set: {
-                            title: game.title,
-                            slug: game.slug,
-                            description: description, // ¡La descripción de la IA!
-                            category: category,
-                            thumbnailUrl: game.thumbnailUrl,
-                            embedUrl: game.embedUrl,
-                            source: game.source
-                        }
-                    },
-                    upsert: true
-                }
-            });
+            // 3. La Descripción Base (estimación)
+            const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
+            
+            // 4. La Miniatura (estimación)
+            const thumbnail = $$('meta[property="og:image"]').attr('content') || '';
+            
+            // 5. La Categoría (estimación)
+            const category = $$('a[href*="/c/"]').first().text().trim() || 'general';
+
+            console.log(`Datos extraídos para: ${title}`);
+
+            // --- FASE 4C: Llamar a la IA (AWS Bedrock) ---
+            const seoDescription = await generateGameDescription(title, description, category);
+
+            if (seoDescription) {
+                operations.push({
+                    updateOne: {
+                        filter: { slug: gameSlug },
+                        update: {
+                            $set: {
+                                title: title,
+                                slug: gameSlug,
+                                description: seoDescription, // ¡La descripción de la IA!
+                                category: category,
+                                thumbnailUrl: thumbnail,
+                                embedUrl: iframeSrc, // ¡El iframe que extrajimos!
+                                source: 'GameDistribution'
+                            }
+                        },
+                        upsert: true
+                    }
+                });
+            }
+        } catch (err) {
+            console.error(`Error procesando ${detailUrl}: ${err.message}`);
         }
     }
 
@@ -184,11 +208,11 @@ exports.syncGames = async (req, res) => {
         
         res.json({
             message: "¡Sincronización de juegos completada!",
-            totalEncontrados: scrapedGames.length,
-            totalNuevos: newGames.length,
+            totalEncontrados: gameLinks.length,
+            totalNuevos: newGameLinks.length,
             totalGuardadosEnDB: result.upsertedCount
         });
     } else {
-        res.json({ message: "Se encontraron juegos nuevos, pero la IA falló en generar descripciones.", totalNuevos: newGames.length });
+        res.json({ message: "Se encontraron juegos nuevos, pero hubo un error al extraer detalles o generar descripciones.", totalNuevos: newGameLinks.length });
     }
 };
