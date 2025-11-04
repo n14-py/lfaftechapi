@@ -4,22 +4,22 @@ const Game = require('../models/game');
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
 const BASE_URL = 'https://gamedistribution.com';
+const START_PAGE = `${BASE_URL}/games`; // Página para la "semilla"
 
 // Función helper para añadir pausas (¡LA CLAVE ANTI-BLOQUEO!)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * [INTERNO] Función de trabajo pesado para UN solo juego.
- * Esta función ahora hace 2 cosas:
- * 1. Extrae los datos del juego (slug).
- * 2. Encuentra los juegos recomendados en esa página.
+ * Esta es la parte "inteligente" que se recupera de fallos.
+ * Ahora también devuelve los recomendados que encuentra.
  */
-async function _processGameAndFindRecommended(gameSlug) {
+async function _processGameAndFindRecommended(gameSlug, initialImageUrl) {
     const detailUrl = `${BASE_URL}/games/${gameSlug}`;
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     try {
-        // FASE A: Scrapear la página de detalle
+        // FASE A: Scrapear la página de detalle (¡Con renderizado!)
         const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=7000`;
         
         // Timeout de 60 segundos
@@ -29,7 +29,10 @@ async function _processGameAndFindRecommended(gameSlug) {
         // --- FASE B: Extraer Datos del Juego (Lógica Híbrida) ---
         let title, embedUrl, thumbnailUrl, category, description;
         let languages = [], genders = [], ageGroups = [];
-        const sourceUrl = detailUrl;
+        
+        // Usamos la imagen de la lista como primera opción (es la que ve el usuario)
+        thumbnailUrl = initialImageUrl; 
+        const sourceUrl = detailUrl;    
 
         // --- INTENTO 1: Método JSON (El mejor) ---
         const jsonData = $$('script[id="__NEXT_DATA__"]').html();
@@ -41,14 +44,17 @@ async function _processGameAndFindRecommended(gameSlug) {
                 if (gameData && gameData.url && gameData.title) {
                     title = gameData.title;
                     embedUrl = gameData.url;
+                    // Sobrescribir la imagen SOLO si encontramos una de mejor calidad
                     if (gameData.assets && gameData.assets.cover) {
-                        thumbnailUrl = gameData.assets.cover; // ¡Imagen encontrada!
+                        thumbnailUrl = gameData.assets.cover;
                     }
                     category = gameData.categories[0] || 'general';
                     description = gameData.description;
                     languages = gameData.languages || [];
                     genders = gameData.genders || [];
                     ageGroups = gameData.ageGroups || [];
+                    
+                    console.log(`[ÉXITO JSON] Datos extraídos para: ${title} (Cat: ${category})`);
                 }
             } catch (e) {
                 console.warn(`[AVISO] JSON corrupto en ${detailUrl}. Usando fallback HTML.`);
@@ -64,6 +70,7 @@ async function _processGameAndFindRecommended(gameSlug) {
                 const match = embedText.match(/src="([^"]+)"/);
                 if (match && match[1]) {
                     embedUrl = match[1];
+                    console.log(`[FALLBACK] embedUrl encontrado en HTML.`);
                 }
             }
         }
@@ -72,7 +79,7 @@ async function _processGameAndFindRecommended(gameSlug) {
         if (!embedUrl) {
             throw new Error(`[FALLO FATAL] No se pudo encontrar embedUrl (ni JSON ni HTML) para ${detailUrl}.`);
         }
-        
+
         // 2. Buscar Título (Si falta)
         if (!title) {
             title = gameSlug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -92,8 +99,10 @@ async function _processGameAndFindRecommended(gameSlug) {
             
             if (descNode.is('p')) {
                 description = descNode.text();
+                console.log(`[FALLBACK] Descripción real (HTML) encontrada para ${title}.`);
             } else {
-                description = null;
+                description = null; // Guardar sin descripción
+                console.warn(`[AVISO] No se encontró descripción real (ni JSON ni HTML) para ${title}. Se guardará sin descripción.`);
             }
         }
         
@@ -103,7 +112,7 @@ async function _processGameAndFindRecommended(gameSlug) {
             slug: gameSlug,
             description: description,
             category: category,
-            thumbnailUrl: thumbnailUrl, // Puede ser null si el JSON falló
+            thumbnailUrl: thumbnailUrl, // La imagen que teníamos
             embedUrl: embedUrl.split('?')[0],
             source: 'GameDistribution',
             sourceUrl: sourceUrl,
@@ -113,19 +122,21 @@ async function _processGameAndFindRecommended(gameSlug) {
         };
         
         // --- FASE C: Encontrar Juegos Recomendados (Tu nueva lógica) ---
-        const recommendedSlugs = new Set();
+        const recommendedItems = []; // Array de { slug, imageUrl }
         
-        // Buscamos el <h2> que contiene "Recommended" y luego todos los enlaces de juegos dentro de su contenedor padre
         const recommendedSection = $$("h2:contains('Recommended')").parent();
         
         if (recommendedSection.length) {
             recommendedSection.find('a[href^="/games/"]').each((i, el) => {
                 const link = $$(el).attr('href');
-                if (link) {
+                const imageUrl = $$(el).find('img').attr('src'); // Capturar imagen del recomendado
+
+                // --- ¡¡EL FIX IMPORTANTE!! ---
+                // Ignorar enlaces inválidos (que contengan "?") y asegurar que tengan imagen
+                if (link && !link.includes('?') && imageUrl) { 
                     const slug = link.split('/')[2];
-                    // Añadimos si es un slug válido y no es el mismo juego que estamos viendo
-                    if (slug && slug !== gameSlug) { 
-                        recommendedSlugs.add(slug);
+                    if (slug && slug !== gameSlug) {
+                        recommendedItems.push({ slug: slug, imageUrl: imageUrl });
                     }
                 }
             });
@@ -133,10 +144,13 @@ async function _processGameAndFindRecommended(gameSlug) {
              console.warn(`[AVISO] No se encontró la sección "Recommended" en ${detailUrl}.`);
         }
         
+        // De-duplicar los items de *esta* página antes de devolverlos
+        const uniqueRecommended = Array.from(new Map(recommendedItems.map(item => [item.slug, item])).values());
+
         // Devolvemos el objeto de datos y la lista de nuevos slugs
         return {
             gameData: gameData,
-            newRecommendedSlugs: Array.from(recommendedSlugs)
+            newRecommendedItems: uniqueRecommended
         };
 
     } catch (err) {
@@ -161,7 +175,6 @@ exports.syncGames = async (req, res) => {
 
 /**
  * [INTERNO] Esta es la función de trabajo pesado (El Crawler).
- * Esta función reemplaza la lógica de paginación.
  */
 async function _runSyncJob() {
     console.log(`--- INICIANDO SYNC DE JUEGOS (MODO CRAWLER INFINITO) ---`);
@@ -174,7 +187,9 @@ async function _runSyncJob() {
 
     let totalJuegosGuardados = 0;
     let totalJuegosFallidos = 0;
-    let queue = []; // Cola de slugs a procesar
+    
+    // La cola ahora guarda objetos: { slug, imageUrl }
+    let queue = []; 
     
     // Set de slugs (en cola O en DB) para no repetir
     let processedSlugs = new Set(); 
@@ -188,8 +203,7 @@ async function _runSyncJob() {
 
         // --- FASE 2: "SEMILLA" (Seed) - Obtener la primera página para empezar ---
         console.log("Obteniendo la página principal para la 'semilla' inicial...");
-        const seedUrl = `${BASE_URL}/games`;
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(seedUrl)}&render=true&wait=5000`;
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(START_PAGE)}&render=true&wait=5000`;
         
         const response = await axios.get(scraperUrl, { timeout: 90000 }); 
         const $ = cheerio.load(response.data);
@@ -197,20 +211,29 @@ async function _runSyncJob() {
         // Buscamos los juegos en la página principal para añadirlos a la cola
         $('a[href^="/games/"]').each((i, el) => {
             const link = $(el).attr('href');
-            if (!link || link.includes('?collectionID=') || link === '/games') {
+            const imageUrl = $(el).find('img').attr('src');
+            
+            // --- ¡¡EL FIX IMPORTANTE!! ---
+            // Ignorar enlaces inválidos (con "?", sin link, o sin imagen)
+            if (!link || link.includes('?') || link === '/games' || !imageUrl) {
                 return;
             }
+            
             const slug = link.split('/')[2];
+
             // Si es un slug válido y NO lo hemos procesado (ni está en la DB)
             if (slug && !processedSlugs.has(slug)) {
-                queue.push(slug);
+                queue.push({ slug: slug, imageUrl: imageUrl });
                 processedSlugs.add(slug); // Añadir a 'processed' para no meterlo en la cola de nuevo
             }
         });
         
-        if (queue.length === 0) {
-             console.log("La página de semilla no tenía juegos nuevos (ya están todos en la DB). El bot se detendrá.");
+        if (queue.length === 0 && existingGames.length === 0) {
+             console.log("La página de semilla no encontró ningún juego. Revisa el scraping de la página principal.");
              return;
+        } else if (queue.length === 0) {
+            console.log("La página de semilla no tenía juegos nuevos (ya están todos en la DB). El bot se detendrá.");
+            return;
         }
 
         console.log(`Semilla obtenida. ${queue.length} juegos nuevos encontrados en la página 1 para iniciar la cola.`);
@@ -220,17 +243,17 @@ async function _runSyncJob() {
         while (queue.length > 0) {
             
             // Saca el PRIMER juego de la cola (First-In, First-Out)
-            const slugToProcess = queue.shift(); 
+            const { slug: slugToProcess, imageUrl: initialImageUrl } = queue.shift(); 
             
             try {
-                // ¡LA PAUSA ANTI-BLOQUEO!
-                console.log(`\nJuegos restantes en cola: ${queue.length}. (Pausando 5 segundos...)`);
-                await sleep(5000); 
+                // ¡LA PAUSA ANTI-BLOQUEO! (Aumentada a 7 segundos)
+                console.log(`\nJuegos restantes en cola: ${queue.length}. (Pausando 7 segundos...)`);
+                await sleep(7000); 
 
                 console.log(`Procesando juego: ${slugToProcess}...`);
                 
                 // 1. Obtenemos datos del juego Y sus recomendaciones
-                const { gameData, newRecommendedSlugs } = await _processGameAndFindRecommended(slugToProcess);
+                const { gameData, newRecommendedItems } = await _processGameAndFindRecommended(slugToProcess, initialImageUrl);
 
                 // 2. Guardamos este juego en la DB
                 await Game.updateOne(
@@ -239,21 +262,21 @@ async function _runSyncJob() {
                     { upsert: true }         // Si no existe, lo crea
                 );
                 
-                console.log(`[ÉXITO] Juego guardado: ${gameData.title}.`);
+                console.log(`[ÉXITO] Juego guardado: ${gameData.title}`);
                 totalJuegosGuardados++;
                 
                 // 3. Añadimos los *nuevos* slugs recomendados al FINAL de la cola
                 let addedToQueue = 0;
-                for (const newSlug of newRecommendedSlugs) {
+                for (const newItem of newRecommendedItems) {
                     // Si NUNCA lo hemos visto (ni en DB, ni en cola)
-                    if (!processedSlugs.has(newSlug)) {
-                        queue.push(newSlug); // Añadir al final de la cola
-                        processedSlugs.add(newSlug); // Marcar como "visto"
+                    if (!processedSlugs.has(newItem.slug)) {
+                        queue.push(newItem); // Añadir objeto { slug, imageUrl } al final de la cola
+                        processedSlugs.add(newItem.slug); // Marcar como "visto"
                         addedToQueue++;
                     }
                 }
                 if (addedToQueue > 0) {
-                     console.log(`-> Se encontraron ${newRecommendedSlugs.length} recomendados. ${addedToQueue} fueron añadidos a la cola.`);
+                     console.log(`-> Se encontraron ${newRecommendedItems.length} recomendados. ${addedToQueue} fueron añadidos a la cola.`);
                 }
 
             } catch (error) {
