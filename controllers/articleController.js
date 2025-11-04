@@ -1,15 +1,32 @@
 const mongoose = require('mongoose');
 const Article = require('../models/article');
 
+// --- ¡NUEVO MAPA INTELIGENTE! ---
+// Mapea términos de búsqueda a códigos de país
+const paisTermMap = {
+    "argentina": "ar", "bolivia": "bo", "brasil": "br", "chile": "cl", 
+    "colombia": "co", "costa rica": "cr", "cuba": "cu", "ecuador": "ec", 
+    "el salvador": "sv", "guatemala": "gt", "honduras": "hn", "mexico": "mx", 
+    "nicaragua": "ni", "panama": "pa", "paraguay": "py", "peru": "pe", 
+    "dominicana": "do", "uruguay": "uy", "venezuela": "ve",
+    // También puedes añadir los códigos por si los escriben
+    "ar": "ar", "bo": "bo", "br": "br", "cl": "cl", "co": "co", "cr": "cr", 
+    "cu": "cu", "ec": "ec", "sv": "sv", "gt": "gt", "hn": "hn", "mx": "mx", 
+    "ni": "ni", "pa": "pa", "py": "py", "pe": "pe", "do": "do", "uy": "uy", "ve": "ve"
+};
+
 /**
  * [PÚBLICO] Obtener LISTA de artículos
- * (Lógica de la ruta GET /api/articles)
- * --- ¡ACTUALIZADO CON NUEVA LÓGICA DE FILTRADO! ---
+ * --- ¡VERSIÓN SÚPER INTELIGENTE (v2)! ---
  */
 exports.getArticles = async (req, res) => {
     try {
-        const { sitio, categoria, limite, pagina, pais, query } = req.query;
+        const { sitio, categoria, limite, pagina } = req.query;
         
+        // Obtenemos los filtros de búsqueda
+        let queryTexto = req.query.query || null;
+        let paisFiltro = req.query.pais || null; // ej: "py"
+
         if (!sitio) {
             return res.status(400).json({ error: "El parámetro 'sitio' es obligatorio." });
         }
@@ -18,32 +35,55 @@ exports.getArticles = async (req, res) => {
         const paginaNum = parseInt(pagina) || 1;
         const skip = (paginaNum - 1) * limiteNum;
         
-        // Definiciones base
         let filtro = { sitio: sitio };
         let sort = { fecha: -1 }; 
         let projection = {};      
 
-        // --- LÓGICA DE FILTRO PRINCIPAL (Búsqueda vs. País vs. Categoría) ---
+        // --- ¡¡AQUÍ COMIENZA LA NUEVA LÓGICA DE BÚSQUEDA!! ---
         
-        if (query) {
-            // 1. LÓGICA DE BÚSQUEDA POR TEXTO (Prioridad Máxima)
-            filtro.$text = { $search: query };
+        // 1. ANÁLISIS DE PAÍS:
+        // Si el usuario *no* filtró por un país (ej: no está en la página de Honduras)...
+        // ...vamos a "robar" la palabra del país de su búsqueda.
+        if (queryTexto && !paisFiltro) {
+            const queryPalabras = queryTexto.toLowerCase().split(' ');
+            let paisEncontrado = null;
+            
+            // Revisa cada palabra de la búsqueda
+            for (const palabra of queryPalabras) {
+                if (paisTermMap[palabra]) {
+                    paisEncontrado = paisTermMap[palabra]; // ej: "py"
+                    break;
+                }
+            }
+            
+            // Si encontramos un país en la búsqueda (ej: "accidentes paraguay")
+            if (paisEncontrado) {
+                paisFiltro = paisEncontrado; // Aplicamos el filtro de país
+                
+                // Limpiamos la query (quitamos "paraguay" de la búsqueda)
+                queryTexto = queryPalabras.filter(p => !paisTermMap[p]).join(' ');
+            }
+        }
+        
+        // 2. CONSTRUCCIÓN DEL FILTRO DE MONGO:
+        
+        // A. Añadir filtro de PAÍS si existe (sea explícito o "robado")
+        if (paisFiltro) {
+            filtro.pais = paisFiltro;
+        }
+
+        // B. Añadir filtro de TEXTO si existe
+        if (queryTexto && queryTexto.trim() !== '') {
+            filtro.$text = { $search: queryTexto };
             sort = { score: { $meta: "textScore" } }; 
             projection = { score: { $meta: "textScore" } }; 
-            
-        } else if (pais) {
-            // 2. LÓGICA DE FILTRO POR PAÍS
-            filtro.pais = pais;
-            
-        } else if (categoria && categoria !== 'todos') {
-            // 3. LÓGICA DE FILTRO POR CATEGORÍA (si no es 'todos')
-            filtro.categoria = categoria;
-            
-        } else {
-            // 4. LÓGICA POR DEFECTO (categoria='todos' o 'general')
-            // No aplica filtro de país o categoría, mostrando todo lo del 'sitio'.
         }
-        // --- FIN DE LA LÓGICA ---
+        
+        // C. Añadir filtro de CATEGORÍA (solo si no hay búsqueda de texto Y no hay filtro de país)
+        if (!queryTexto && !paisFiltro && categoria && categoria !== 'todos') {
+            filtro.categoria = categoria;
+        }
+        // --- FIN DE LA LÓGICA DE BÚSQUEDA ---
 
         const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
