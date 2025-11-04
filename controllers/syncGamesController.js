@@ -174,19 +174,37 @@ async function _runSyncJob() {
             
             // FASE 4B: Extraer los datos
             const title = $$('h1').first().text().trim();
-            if (!title) continue; 
-
             const iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
-            if (!iframeSrc) continue; 
+
+            // --- ¡¡INICIO DE DEPURACIÓN!! ---
+            // Revisamos si los selectores de Cheerio fallaron
+            if (!title) {
+                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector 'h1' puede ser incorrecto.`);
+                continue; // Salta al siguiente juego
+            }
+            if (!iframeSrc) {
+                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. El selector 'iframe[src*="html5.gamedistribution.com"]' puede ser incorrecto.`);
+                continue; // Salta al siguiente juego
+            }
+            // --- ¡¡FIN DE DEPURACIÓN!! ---
+
 
             const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
             const thumbnail = $$('meta[property="og:image"]').attr('content') || '';
             const category = $$('a[href*="/c/"]').first().text().trim() || 'general';
 
-            console.log(`Datos extraídos para: ${title}`);
+            console.log(`Datos extraídos para: ${title} (Categoría: ${category}). Llamando a IA...`);
 
             // FASE 4C: Llamar a la IA (AWS Bedrock)
             const seoDescription = await generateGameDescription(title, description, category);
+
+            // --- ¡¡INICIO DE DEPURACIÓN!! ---
+            if (!seoDescription) {
+                console.error(`[DEPURACIÓN] IA falló para ${title}. No se guardará. (Revisar Bedrock)`);
+                // No usamos 'continue' aquí, por si acaso el 'if' de abajo lo necesita
+            }
+            // --- ¡¡FIN DE DEPURACIÓN!! ---
+
 
             if (seoDescription) {
                 operations.push({
@@ -225,5 +243,6 @@ async function _runSyncJob() {
         });
     } else {
         console.log("Se encontraron juegos nuevos, pero hubo un error al extraer detalles o generar descripciones.");
+        console.log("[INSTRUCCIÓN] Revisa los logs de [DEPURACIÓN] de arriba para ver por qué fallaron los 19 juegos.");
     }
 };
