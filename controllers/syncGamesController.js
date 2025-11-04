@@ -120,10 +120,17 @@ async function _runSyncJob() {
     for (const link of newGameLinks) {
         const gameSlug = link.split('/')[2];
         const detailUrl = `${BASE_URL}${link}`;
+
+        // Filtramos URLs inválidas que encontramos en tu log
+        if (!gameSlug || link.includes('?collectionID=')) {
+            console.warn(`[OMITIENDO] URL inválida o de colección: ${link}`);
+            continue;
+        }
         
         try {
-            // FASE 4A: Scrapear la página de detalle
-            const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}`;
+            // --- ¡¡FASE 4A: CORRECCIÓN!! ---
+            // Añadimos &render=true&wait=3000 para que SÍ ejecute JavaScript
+            const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}&render=true&wait=3000`;
             
             // Timeout de 30 segundos
             const detailResponse = await axios.get(scraperDetailUrl, { timeout: 30000 }); 
@@ -131,24 +138,17 @@ async function _runSyncJob() {
             const detailHtml = detailResponse.data;
             const $$ = cheerio.load(detailHtml);
             
-            // --- ¡¡FASE 4B: EXTRAER LOS DATOS (CORREGIDO)!! ---
+            // --- ¡¡FASE 4B: EXTRAER LOS DATOS (LÓGICA MEJORADA)!! ---
             
             // 1. Encontrar el TÍTULO
-            // Buscamos cualquier elemento que contenga "Game Title:" y agarramos el texto
             const titleElement = $$("*:contains('Game Title:')").last();
-            const title = titleElement.text().replace('Game Title:', '').trim();
+            let title = titleElement.text().replace('Game Title:', '').trim();
 
             // 2. Encontrar el IFRAME
-            // Basado en tu HTML, el iframe está dentro de un <textarea> o <code>.
-            // Primero intentamos buscar el iframe directamente.
             let iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
-            
-            // Si no lo encuentra (porque está como texto), buscamos el texto del embed
             if (!iframeSrc) {
-                 // Buscamos un <code> o <textarea> que contenga el texto del iframe
                 const embedText = $$("*:contains('<iframe src=\"https://html5.gamedistribution.com')").text();
                 if (embedText) {
-                    // Sacamos la URL de adentro del texto
                     const match = embedText.match(/src="([^"]+)"/);
                     if (match && match[1]) {
                         iframeSrc = match[1];
@@ -156,22 +156,24 @@ async function _runSyncJob() {
                 }
             }
             
-            // --- Lógica de Depuración Actualizada ---
-            if (!title) {
-                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector ":contains('Game Title:')" falló.`);
+            // --- Lógica de Depuración y Fallback ---
+            
+            // SI EL IFRAME NO SE ENCUENTRA, ES UN ERROR FATAL.
+            if (!iframeSrc) {
+                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. Omitiendo.`);
                 continue; 
             }
-            if (!iframeSrc) {
-                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. (Título encontrado: ${title})`);
-                continue; 
+
+            // SI EL TÍTULO NO SE ENCUENTRA, USAMOS EL SLUG (TU IDEA)
+            if (!title) {
+                console.warn(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. Usando fallback.`);
+                // Convertir "foxy-eco-sort" a "Foxy Eco Sort"
+                title = gameSlug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
             }
             // --- Fin Lógica de Depuración ---
 
-            // Usamos la descripción <meta> como fallback
             const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
             const thumbnail = $$('meta[property="og:image"]').attr('content') || '';
-            
-            // Lógica para CATEGORÍA: Buscamos "Gender" o "Age Group" o <meta>
             let category = $$("*:contains('Gender')").next().text().trim() || $$("*:contains('Age Group')").next().text().trim();
             category = category.split('\n')[0].trim() || 'general'; // Limpiamos
 
@@ -179,7 +181,7 @@ async function _runSyncJob() {
 
             // FASE 4C: IA (OMITIDA)
 
-            // Guardamos directamente si tenemos título e iframe
+            // Guardamos directamente
             operations.push({
                 updateOne: {
                     filter: { slug: gameSlug },
@@ -187,10 +189,10 @@ async function _runSyncJob() {
                         $set: {
                             title: title,
                             slug: gameSlug,
-                            description: description, // Usamos la descripción <meta>
+                            description: description,
                             category: category,
                             thumbnailUrl: thumbnail,
-                            embedUrl: iframeSrc.split('?')[0], // Guardamos la URL limpia
+                            embedUrl: iframeSrc.split('?')[0],
                             source: 'GameDistribution'
                         }
                     },
