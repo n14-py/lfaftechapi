@@ -4,8 +4,6 @@ const Game = require('../models/game');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
-// (BedrockClient se mantiene aunque no se use en este script, 
-// para no romper la importación en otros archivos si existiera)
 const { AWS_BEDROCK_ACCESS_KEY_ID, AWS_BEDROCK_SECRET_ACCESS_KEY, AWS_BEDROCK_REGION } = process.env;
 const bedrockClient = new BedrockRuntimeClient({
     region: AWS_BEDROCK_REGION,
@@ -133,18 +131,28 @@ async function _runSyncJob() {
             const detailHtml = detailResponse.data;
             const $$ = cheerio.load(detailHtml);
             
-            // FASE 4B: Extraer los datos
-            const title = $$('h1').first().text().trim();
-            const iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
+            // --- ¡¡FASE 4B: EXTRAER LOS DATOS (AQUÍ ESTÁ LA CORRECCIÓN)!! ---
+            
+            // EJEMPLO: Si el nuevo título es <div class="game-name">...</div>
+            // const title = $$('div.game-name').first().text().trim();
+            // EJEMPLO: Si el nuevo título es <h2>...</h2>
+            // const title = $$('h2').first().text().trim();
+            
+            // ¡¡REEMPLAZA ESTAS LÍNEAS!!
+            const title = $$('TU_NUEVO_SELECTOR_DE_TITULO').first().text().trim();
+            const iframeSrc = $$('TU_NUEVO_SELECTOR_DE_IFRAME').attr('src');
 
+
+            // --- Lógica de Depuración Actualizada ---
             if (!title) {
-                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}.`);
+                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector 'TU_NUEVO_SELECTOR_DE_TITULO' es incorrecto o no existe.`);
                 continue; 
             }
             if (!iframeSrc) {
-                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}.`);
+                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. El selector 'TU_NUEVO_SELECTOR_DE_IFRAME' es incorrecto o no existe.`);
                 continue; 
             }
+            // --- Fin Lógica de Depuración ---
 
             // Usamos la descripción <meta> como fallback
             const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
@@ -154,9 +162,7 @@ async function _runSyncJob() {
             console.log(`Datos extraídos para: ${title}. (Guardando sin IA)`);
 
             // FASE 4C: IA (OMITIDA)
-            // const seoDescription = await generateGameDescription(title, description, category);
 
-            // --- ¡¡LÓGICA DE GUARDADO MODIFICADA!! ---
             // Guardamos directamente si tenemos título e iframe
             operations.push({
                 updateOne: {
