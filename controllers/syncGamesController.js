@@ -83,8 +83,7 @@ exports.syncGames = async (req, res) => {
     // --- FASE 1: SCRAPING (El Robot visita la web) ---
     let htmlContent;
     try {
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}`;
-        const response = await axios.get(scraperUrl);
+const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}&render=true&premium=true`;        const response = await axios.get(scraperUrl);
         htmlContent = response.data;
         console.log(`ScraperAPI trajo el HTML de ${TARGET_URL} exitosamente.`);
     } catch (error) {
