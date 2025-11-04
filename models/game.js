@@ -8,24 +8,28 @@ const GameSchema = new mongoose.Schema({
     // ej: "bullet-force" (para la URL amigable: tusinitusineli.com/juego/bullet-force)
     slug: { type: String, required: true, unique: true, index: true },
     
-    // La reseña única de 300-500 palabras generada por AWS Bedrock
+    // La descripción real (ya no es la de 19,000 games)
     description: { type: String },
     
     // ej: "Shooter", "Puzzle", "io"
     category: { type: String, required: true, index: true },
     
-    // ej: "https://imgs.crazygames.com/bullet-force.png"
+    // ej: "https_//img.gamedistribution.com/..."
     thumbnailUrl: { type: String, required: true },
     
-    // ej: "https://www.crazygames.com/embed/bullet-force"
+    // ej: "https_//html5.gamedistribution.com/..."
     embedUrl: { type: String, required: true },
     
-    // El sitio de donde lo scrapeamos (ej: "CrazyGames")
+    // El
     source: { type: String },
     
-    // --- ¡¡LÍNEA AÑADIDA!! ---
-    // La URL original de GameDistribution (para tu referencia)
+    // --- ¡NUEVO! (Para tu referencia) ---
     sourceUrl: { type: String },
+    
+    // --- ¡NUEVO! (Datos extra que pediste) ---
+    languages: [String],
+    genders: [String],
+    ageGroups: [String],
     
     // Para ordenar por popularidad o novedad
     views: { type: Number, default: 0 },
@@ -33,7 +37,6 @@ const GameSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // --- ¡La Magia del Buscador! ---
-// (Esto ya existía)
 GameSchema.index({ 
     title: 'text', 
     description: 'text', 
