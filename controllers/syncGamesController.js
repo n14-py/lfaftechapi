@@ -16,8 +16,9 @@ const bedrockClient = new BedrockRuntimeClient({
 });
 const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0'; // Usamos Haiku, el más rápido y barato
 
-// El sitio que vamos a scrapear (como vimos en tu index.html)
-const TARGET_URL = 'https://www.crazygames.com/c/new'; // Página de "Nuevos Juegos"
+// --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+// La URL correcta no lleva la "/c/"
+const TARGET_URL = 'https://www.crazygames.com/new'; // Página de "Nuevos Juegos"
 
 
 /**
@@ -83,7 +84,13 @@ exports.syncGames = async (req, res) => {
     // --- FASE 1: SCRAPING (El Robot visita la web) ---
     let htmlContent;
     try {
-const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}&render=true&premium=true`;        const response = await axios.get(scraperUrl);
+        // --- ¡¡AQUÍ ESTÁ LA SEGUNDA CORRECCIÓN!! ---
+        // Dejamos solo &render=true. Es más barato y es el paso correcto.
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}&render=true`;
+        
+        console.log(`Llamando a ScraperAPI con URL: ${TARGET_URL}`);
+        
+        const response = await axios.get(scraperUrl);
         htmlContent = response.data;
         console.log(`ScraperAPI trajo el HTML de ${TARGET_URL} exitosamente.`);
     } catch (error) {
@@ -143,7 +150,7 @@ const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${enc
     let operations = [];
     for (const game of newGames) {
         // Obtenemos la categoría (del HTML) o usamos 'general'
-        // Esto es un selector de ejemplo, puede fallar si CrazyGames cambia su HTML
+        // Este es un selector de ejemplo, puede fallar si CrazyGames cambia su HTML
         const categoryString = $(`a[href="/game/${game.slug}"]`).closest('div[class*="game-card_card"]').find('div[class*="game-card_category"]').text();
         const category = categoryString || 'general'; // Fallback
 
