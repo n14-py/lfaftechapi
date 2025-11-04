@@ -6,7 +6,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-// Importamos el "enrutador" principal
+// Importamos el "enrutador" principal (que ahora incluye /api/games)
 const apiRoutes = require('./routes/index');
 
 const app = express();
@@ -20,13 +20,16 @@ const PORT = process.env.PORT || 3000;
 const whiteList = [
     'http://127.0.0.1:5500',  // Tu localhost (IP)
     'http://localhost:5500',   // Tu localhost (Nombre)
+    
+    // --- SITIOS EXISTENTES ---
     'https://www.noticias.lat', // Tu sitio de noticias en Vercel
     'https://noticias.lat',
-    'https://www.turadio.lat' ,  // Tu sitio de noticias sin 'www'
+    'https://www.turadio.lat' ,  // Tu sitio de radio
     'https://turadio.lat', 
-    'https://turadiolat-1f0g3n2p3-nando14s-projects.vercel.app'     // Tu futuro sitio de radio en Vercel
-    // Añade aquí tu URL de Vercel de desarrollo si es diferente
-    // ej: 'https://turadio-proyecto.vercel.app' 
+    
+    // --- ¡¡NUEVOS SITIOS AÑADIDOS!! ---
+    'https://www.tusinitusineli.com', // Tu nuevo sitio de juegos
+    'https://tusinitusineli.com'
 ];
 
 const corsOptions = {
@@ -59,7 +62,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // =============================================
 // RUTAS DE LA API
 // =============================================
-app.use('/api', apiRoutes);
+app.use('/api', apiRoutes); // Esto ahora incluye /api/articles, /api/radio, y /api/juegos
 
 // Ruta de bienvenida básica
 app.get('/', (req, res) => {
