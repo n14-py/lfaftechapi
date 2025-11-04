@@ -131,25 +131,38 @@ async function _runSyncJob() {
             const detailHtml = detailResponse.data;
             const $$ = cheerio.load(detailHtml);
             
-            // --- ¡¡FASE 4B: EXTRAER LOS DATOS (AQUÍ ESTÁ LA CORRECCIÓN)!! ---
+            // --- ¡¡FASE 4B: EXTRAER LOS DATOS (CORREGIDO)!! ---
             
-            // EJEMPLO: Si el nuevo título es <div class="game-name">...</div>
-            // const title = $$('div.game-name').first().text().trim();
-            // EJEMPLO: Si el nuevo título es <h2>...</h2>
-            // const title = $$('h2').first().text().trim();
+            // 1. Encontrar el TÍTULO
+            // Buscamos cualquier elemento que contenga "Game Title:" y agarramos el texto
+            const titleElement = $$("*:contains('Game Title:')").last();
+            const title = titleElement.text().replace('Game Title:', '').trim();
+
+            // 2. Encontrar el IFRAME
+            // Basado en tu HTML, el iframe está dentro de un <textarea> o <code>.
+            // Primero intentamos buscar el iframe directamente.
+            let iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
             
-            // ¡¡REEMPLAZA ESTAS LÍNEAS!!
-            const title = $$('TU_NUEVO_SELECTOR_DE_TITULO').first().text().trim();
-            const iframeSrc = $$('TU_NUEVO_SELECTOR_DE_IFRAME').attr('src');
-
-
+            // Si no lo encuentra (porque está como texto), buscamos el texto del embed
+            if (!iframeSrc) {
+                 // Buscamos un <code> o <textarea> que contenga el texto del iframe
+                const embedText = $$("*:contains('<iframe src=\"https://html5.gamedistribution.com')").text();
+                if (embedText) {
+                    // Sacamos la URL de adentro del texto
+                    const match = embedText.match(/src="([^"]+)"/);
+                    if (match && match[1]) {
+                        iframeSrc = match[1];
+                    }
+                }
+            }
+            
             // --- Lógica de Depuración Actualizada ---
             if (!title) {
-                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector 'TU_NUEVO_SELECTOR_DE_TITULO' es incorrecto o no existe.`);
+                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector ":contains('Game Title:')" falló.`);
                 continue; 
             }
             if (!iframeSrc) {
-                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. El selector 'TU_NUEVO_SELECTOR_DE_IFRAME' es incorrecto o no existe.`);
+                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. (Título encontrado: ${title})`);
                 continue; 
             }
             // --- Fin Lógica de Depuración ---
@@ -157,7 +170,10 @@ async function _runSyncJob() {
             // Usamos la descripción <meta> como fallback
             const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
             const thumbnail = $$('meta[property="og:image"]').attr('content') || '';
-            const category = $$('a[href*="/c/"]').first().text().trim() || 'general';
+            
+            // Lógica para CATEGORÍA: Buscamos "Gender" o "Age Group" o <meta>
+            let category = $$("*:contains('Gender')").next().text().trim() || $$("*:contains('Age Group')").next().text().trim();
+            category = category.split('\n')[0].trim() || 'general'; // Limpiamos
 
             console.log(`Datos extraídos para: ${title}. (Guardando sin IA)`);
 
@@ -174,7 +190,7 @@ async function _runSyncJob() {
                             description: description, // Usamos la descripción <meta>
                             category: category,
                             thumbnailUrl: thumbnail,
-                            embedUrl: iframeSrc, 
+                            embedUrl: iframeSrc.split('?')[0], // Guardamos la URL limpia
                             source: 'GameDistribution'
                         }
                     },
