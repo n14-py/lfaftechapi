@@ -4,6 +4,8 @@ const Game = require('../models/game');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // --- 1. CONFIGURACIÓN DEL ROBOT ---
+// (BedrockClient se mantiene aunque no se use en este script, 
+// para no romper la importación en otros archivos si existiera)
 const { AWS_BEDROCK_ACCESS_KEY_ID, AWS_BEDROCK_SECRET_ACCESS_KEY, AWS_BEDROCK_REGION } = process.env;
 const bedrockClient = new BedrockRuntimeClient({
     region: AWS_BEDROCK_REGION,
@@ -19,49 +21,11 @@ const LIST_PAGE_URL = `${BASE_URL}/games`;
 
 /**
  * Función de IA: Escribe la reseña SEO para un juego.
- * (Sin cambios)
+ * --- ¡¡FUNCIÓN DESACTIVADA TEMPORALMENTE PARA PRUEBAS!! ---
  */
 async function generateGameDescription(gameTitle, baseDescription, gameCategory) {
-    const systemPrompt = `Eres un redactor SEO carismático para 'tusinitusineli.com'. Tu trabajo es reescribir y expandir una descripción de un juego para hacerla única, de 300-400 palabras, y optimizada para SEO.
-
-Directrices:
-1.  **Formato:** Responde ÚNICAMENTE con el artículo. Sin saludos ni "¡Claro!".
-2.  **SEO:** Incluye natural y repetidamente: "jugar ${gameTitle} gratis", "cómo jugar ${gameTitle}", "jugar online ${gameTitle}", "mejores juegos de ${gameCategory}".
-3.  **Contenido:** Usa la descripción base como inspiración, pero NO la copies. Expándela, habla de los controles (invéntalos si es necesario), la emoción del juego y por qué es divertido.`;
-    
-    const userPrompt = `Reescribe y expande (300-400 palabras) esta descripción para SEO:
--   Nombre: ${gameTitle}
--   Categoría: ${gameCategory}
--   Descripción Base: "${baseDescription}"`;
-
-    const payload = {
-        modelId: MODEL_ID,
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify({
-            anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 1024,
-            temperature: 0.7,
-            system: systemPrompt,
-            messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
-        })
-    };
-
-    try {
-        const command = new InvokeModelCommand(payload);
-        const response = await bedrockClient.send(command);
-        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-        
-        if (responseBody.content && responseBody.content.length > 0) {
-            const generatedText = responseBody.content[0].text.trim();
-            console.log(`-> IA (Bedrock) generó descripción para ${gameTitle}`);
-            return generatedText;
-        }
-        return null;
-    } catch (error) {
-        console.error(`Error al invocar Bedrock para ${gameTitle}:`, error.message);
-        return null;
-    }
+    // Esta función ya no se llama, pero la dejamos por si la reactivamos
+    return "Descripción de IA omitida para prueba de scraping.";
 }
 
 
@@ -74,12 +38,10 @@ Directrices:
 exports.syncGames = async (req, res) => {
     // 1. Responde al usuario INMEDIATAMENTE para evitar el timeout 502
     res.json({
-        message: "¡Robot iniciado! El trabajo de scraping e IA ha comenzado en segundo plano." +
-                 " Revisa los logs de Render para ver el progreso (puede tardar varios minutos)."
+        message: "¡Robot iniciado! El trabajo de scraping ha comenzado en segundo plano (MODO DE PRUEBA: SIN IA)."
     });
 
     // 2. Llama a la función real SIN 'await'
-    // Esto libera la solicitud y deja que el robot trabaje en el fondo.
     _runSyncJob(); 
 };
 
@@ -94,53 +56,49 @@ async function _runSyncJob() {
 
     if (!scraperApiKey) {
         console.error("No se encontró la clave de SCRAPER_API_KEY en .env");
-        return; // Termina la función silenciosamente
+        return; 
     }
 
     // --- FASE 1: SCRAPING (Obtener la lista de juegos) ---
     let htmlContent;
     try {
-        // Usamos &render=true para ejecutar JavaScript y &wait=3000 para esperar 3 segundos
         const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(LIST_PAGE_URL)}&render=true&wait=3000`;
-        
         console.log(`Llamando a ScraperAPI (Modo Renderizado + Espera 3s) para la lista: ${LIST_PAGE_URL}`);
         
-        const response = await axios.get(scraperUrl);
+        // Timeout de 60 segundos
+        const response = await axios.get(scraperUrl, { timeout: 60000 }); 
+        
         htmlContent = response.data;
         console.log(`ScraperAPI trajo el HTML (Renderizado) de la LISTA exitosamente.`);
     } catch (error) {
         console.error("Error al llamar a ScraperAPI (Fase 1: Lista):", error.message);
-        return; // Termina la función
+        return; 
     }
 
     // --- FASE 2: PARSEO (Leer la lista de juegos) ---
     let gameLinks = [];
     try {
         const $ = cheerio.load(htmlContent);
-        
-        // Buscamos los links que van a las páginas de juegos (ej. /games/elytra-flight)
         $('a[href^="/games/"]').each((i, el) => {
             const href = $(el).attr('href');
             if (href && !gameLinks.includes(href) && href !== '/games') {
                 gameLinks.push(href);
             }
         });
-        
-        gameLinks = gameLinks.slice(0, 20); // Tomamos solo 20
-        
+        gameLinks = gameLinks.slice(0, 20); 
         console.log(`Scraping encontró ${gameLinks.length} links de juegos en la página.`);
     } catch (e) {
          console.error("Error al parsear la lista con Cheerio:", e.message);
-         return; // Termina la función
+         return; 
     }
     
     if (gameLinks.length === 0) {
         console.log("Scraping no encontró links de juegos. El selector de Cheerio puede estar desactualizado.");
-        return; // Termina la función
+        return; 
     }
 
     // --- FASE 3: DE-DUPLICACIÓN (Ahorro de créditos) ---
-    const allSlugs = gameLinks.map(link => link.split('/')[2]).filter(Boolean); // .filter(Boolean) elimina slugs vacíos
+    const allSlugs = gameLinks.map(link => link.split('/')[2]).filter(Boolean); 
     const existingGames = await Game.find({ slug: { $in: allSlugs } }).select('slug');
     const existingSlugs = new Set(existingGames.map(g => g.slug));
 
@@ -153,22 +111,25 @@ async function _runSyncJob() {
 
     if (newGameLinks.length === 0) {
         console.log("¡Éxito! No se encontraron juegos nuevos.");
-        return; // Termina la función
+        return; 
     }
 
-    // --- FASE 4: SCRAPING (Detalles) + IA (Reseñas) ---
+    // --- FASE 4: SCRAPING (Detalles) ---
     
     let operations = [];
-    console.log(`Iniciando scrapeo de detalles e IA para ${newGameLinks.length} juegos...`);
+    console.log(`Iniciando scrapeo de detalles para ${newGameLinks.length} juegos... (IA OMITIDA)`);
     
     for (const link of newGameLinks) {
         const gameSlug = link.split('/')[2];
         const detailUrl = `${BASE_URL}${link}`;
         
         try {
-            // FASE 4A: Scrapear la página de detalle (Modo Básico, 1 crédito)
+            // FASE 4A: Scrapear la página de detalle
             const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}`;
-            const detailResponse = await axios.get(scraperDetailUrl);
+            
+            // Timeout de 30 segundos
+            const detailResponse = await axios.get(scraperDetailUrl, { timeout: 30000 }); 
+            
             const detailHtml = detailResponse.data;
             const $$ = cheerio.load(detailHtml);
             
@@ -176,55 +137,45 @@ async function _runSyncJob() {
             const title = $$('h1').first().text().trim();
             const iframeSrc = $$('iframe[src*="html5.gamedistribution.com"]').attr('src');
 
-            // --- ¡¡INICIO DE DEPURACIÓN!! ---
-            // Revisamos si los selectores de Cheerio fallaron
             if (!title) {
-                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}. El selector 'h1' puede ser incorrecto.`);
-                continue; // Salta al siguiente juego
+                console.error(`[DEPURACIÓN] Falla al extraer TÍTULO para ${detailUrl}.`);
+                continue; 
             }
             if (!iframeSrc) {
-                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}. El selector 'iframe[src*="html5.gamedistribution.com"]' puede ser incorrecto.`);
-                continue; // Salta al siguiente juego
+                console.error(`[DEPURACIÓN] Falla al extraer IFRAME para ${detailUrl}.`);
+                continue; 
             }
-            // --- ¡¡FIN DE DEPURACIÓN!! ---
 
-
+            // Usamos la descripción <meta> como fallback
             const description = $$('meta[name="description"]').attr('content') || `Juega ${title} ahora.`;
             const thumbnail = $$('meta[property="og:image"]').attr('content') || '';
             const category = $$('a[href*="/c/"]').first().text().trim() || 'general';
 
-            console.log(`Datos extraídos para: ${title} (Categoría: ${category}). Llamando a IA...`);
+            console.log(`Datos extraídos para: ${title}. (Guardando sin IA)`);
 
-            // FASE 4C: Llamar a la IA (AWS Bedrock)
-            const seoDescription = await generateGameDescription(title, description, category);
+            // FASE 4C: IA (OMITIDA)
+            // const seoDescription = await generateGameDescription(title, description, category);
 
-            // --- ¡¡INICIO DE DEPURACIÓN!! ---
-            if (!seoDescription) {
-                console.error(`[DEPURACIÓN] IA falló para ${title}. No se guardará. (Revisar Bedrock)`);
-                // No usamos 'continue' aquí, por si acaso el 'if' de abajo lo necesita
-            }
-            // --- ¡¡FIN DE DEPURACIÓN!! ---
+            // --- ¡¡LÓGICA DE GUARDADO MODIFICADA!! ---
+            // Guardamos directamente si tenemos título e iframe
+            operations.push({
+                updateOne: {
+                    filter: { slug: gameSlug },
+                    update: {
+                        $set: {
+                            title: title,
+                            slug: gameSlug,
+                            description: description, // Usamos la descripción <meta>
+                            category: category,
+                            thumbnailUrl: thumbnail,
+                            embedUrl: iframeSrc, 
+                            source: 'GameDistribution'
+                        }
+                    },
+                    upsert: true
+                }
+            });
 
-
-            if (seoDescription) {
-                operations.push({
-                    updateOne: {
-                        filter: { slug: gameSlug },
-                        update: {
-                            $set: {
-                                title: title,
-                                slug: gameSlug,
-                                description: seoDescription, 
-                                category: category,
-                                thumbnailUrl: thumbnail,
-                                embedUrl: iframeSrc, 
-                                source: 'GameDistribution'
-                            }
-                        },
-                        upsert: true
-                    }
-                });
-            }
         } catch (err) {
             console.error(`Error procesando ${detailUrl}: ${err.message}`);
         }
@@ -236,13 +187,13 @@ async function _runSyncJob() {
         const result = await Game.bulkWrite(operations);
         
         console.log({
-            message: "¡Sincronización de juegos completada!",
+            message: "¡Sincronización de juegos (SIN IA) completada!",
             totalEncontrados: gameLinks.length,
             totalNuevos: newGameLinks.length,
             totalGuardadosEnDB: result.upsertedCount
         });
     } else {
-        console.log("Se encontraron juegos nuevos, pero hubo un error al extraer detalles o generar descripciones.");
-        console.log("[INSTRUCCIÓN] Revisa los logs de [DEPURACIÓN] de arriba para ver por qué fallaron los 19 juegos.");
+        console.log("Se encontraron juegos nuevos, pero hubo un error al extraer detalles.");
+        console.log("[INSTRUCCIÓN] Revisa los logs de [DEPURACIÓN] de arriba para ver por qué fallaron los juegos.");
     }
 };
