@@ -84,14 +84,16 @@ exports.syncGames = async (req, res) => {
     // --- FASE 1: SCRAPING (Obtener la lista de juegos) ---
     let htmlContent;
     try {
-        // Usamos la llamada simple (1 crédito)
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(LIST_PAGE_URL)}`;
+        // --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+        // Añadimos &render=true para que ScraperAPI ejecute el JavaScript de la página
+        // y podamos "ver" los juegos cargados desde la BD.
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(LIST_PAGE_URL)}&render=true`;
         
-        console.log(`Llamando a ScraperAPI (Modo Básico) para la lista: ${LIST_PAGE_URL}`);
+        console.log(`Llamando a ScraperAPI (Modo Renderizado) para la lista: ${LIST_PAGE_URL}`);
         
         const response = await axios.get(scraperUrl);
         htmlContent = response.data;
-        console.log(`ScraperAPI trajo el HTML de la LISTA exitosamente.`);
+        console.log(`ScraperAPI trajo el HTML (Renderizado) de la LISTA exitosamente.`);
     } catch (error) {
         console.error("Error al llamar a ScraperAPI (Fase 1: Lista):", error.message);
         return res.status(500).json({ error: "Fallo al scrapear la lista de juegos." });
@@ -147,7 +149,7 @@ exports.syncGames = async (req, res) => {
         const detailUrl = `${BASE_URL}${link}`;
         
         try {
-            // --- FASE 4A: Scrapear la página de detalle ---
+            // --- FASE 4A: Scrapear la página de detalle (Modo Básico, 1 crédito) ---
             const scraperDetailUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(detailUrl)}`;
             const detailResponse = await axios.get(scraperDetailUrl);
             const detailHtml = detailResponse.data;
