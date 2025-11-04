@@ -14,10 +14,9 @@ const bedrockClient = new BedrockRuntimeClient({
         secretAccessKey: AWS_BEDROCK_SECRET_ACCESS_KEY,
     },
 });
-const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0'; // Usamos Haiku, el más rápido y barato
+const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0'; 
 
-// --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
-// La URL correcta no lleva la "/c/"
+// La URL correcta
 const TARGET_URL = 'https://www.crazygames.com/new'; // Página de "Nuevos Juegos"
 
 
@@ -44,7 +43,7 @@ Directrices:
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
             max_tokens: 1024,
-            temperature: 0.7, // Creativo pero no demasiado loco
+            temperature: 0.7, 
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
@@ -74,7 +73,7 @@ Directrices:
  */
 exports.syncGames = async (req, res) => {
     
-    console.log('--- INICIANDO SYNC DE JUEGOS AUTOMÁTICO ---');
+    console.log('--- INICIANDO SYNC DE JUEGOS AUTOMÁTICO (Intento Básico) ---');
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     if (!scraperApiKey) {
@@ -84,11 +83,11 @@ exports.syncGames = async (req, res) => {
     // --- FASE 1: SCRAPING (El Robot visita la web) ---
     let htmlContent;
     try {
-        // --- ¡¡AQUÍ ESTÁ LA SEGUNDA CORRECCIÓN!! ---
-        // Dejamos solo &render=true. Es más barato y es el paso correcto.
-        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}&render=true`;
+        // --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+        // Quitamos &render=true. Esta es la llamada más simple (y gasta 1 crédito).
+        const scraperUrl = `http://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(TARGET_URL)}`;
         
-        console.log(`Llamando a ScraperAPI con URL: ${TARGET_URL}`);
+        console.log(`Llamando a ScraperAPI (Modo Básico) con URL: ${TARGET_URL}`);
         
         const response = await axios.get(scraperUrl);
         htmlContent = response.data;
