@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 // 1. Definimos los sitios web que SÍ tienen permiso de llamar a esta API
 const whiteList = [
 
-    'https://lfaftechapi.onrender.com'
+    'https://lfaftechapi.onrender.com',
 
     'http://127.0.0.1:5500',  // Tu localhost (IP)
     'http://localhost:5500',   // Tu localhost (Nombre)
