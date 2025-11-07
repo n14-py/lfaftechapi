@@ -8,7 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
-        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; }
+        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; --green: #4CAF50; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; }
         h1, h2 { color: var(--primary); }
@@ -26,12 +26,30 @@
         .playlist-item { display: flex; align-items: center; padding: 12px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid #ccc; transition: transform 0.2s; }
         .playlist-item:hover { transform: translateX(5px); }
         .playlist-item.song { border-left-color: #2196F3; }
-        .playlist-item.jingle {HN border-left-color: #FFC107; }
+        .playlist-item.jingle { border-left-color: #FFC107; }
         .playlist-item.ad { border-left-color: #4CAF50; }
         .handle { cursor: move; padding: 0 15px; font-size: 1.5rem; color: #999; }
         .info { flex-grow: 1; }
         .meta { font-size: 0.85rem; color: #666; }
         .delete-btn { background: #ff4444; padding: 8px 12px; font-size: 0.9rem; }
+        
+        /* Botón de Publicar */
+        .publish-bar {
+            background: #333;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        #publish-btn {
+            background-color: var(--green);
+            font-size: 1.1rem;
+            padding: 12px 20px;
+        }
 
         #loading { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(255,255,255,0.8); display: none; justify-content: center; align-items: center; font-size: 2rem; z-index: 999; }
     </style>
@@ -46,6 +64,11 @@
             <p>Gestiona la programación de tu radio en tiempo real.</p>
         </header>
 
+        <div class="publish-bar">
+            <span>¿Listo para salir al aire?</span>
+            <button id="publish-btn">🚀 PUBLICAR CAMBIOS EN VIVO</button>
+        </div>
+
         <div class="card">
             <h2>📤 Subir Audio</h2>
             <div id="drop-zone">
@@ -54,7 +77,7 @@
                 <input type="file" id="fileInput" accept="audio/*" style="display: none;">
             </div>
             <div class="form-group">
-                <input type="text" id="titleInput" placeholder="Título (Opcional, usa nombre de archivo si está vacío)" style="flex: 2;">
+                <input type="text" id="titleInput" placeholder="Título (Opcional)" style="flex: 2;">
                 <select id="typeInput" style="flex: 1;">
                     <option value="song">🎵 Canción</option>
                     <option value="jingle">🔔 Jingle/Separador</option>
@@ -77,20 +100,20 @@
 
     <script>
         // --- CONFIGURACIÓN ---
-        // Pedimos la clave al iniciar. En un sistema real, usarías login.
         const API_KEY = localStorage.getItem('admin_key') || prompt("🔑 Ingresa tu CLAVE DE ADMINISTRADOR:");
         if (API_KEY) localStorage.setItem('admin_key', API_KEY);
 
-        const API_BASE = '/api/relax'; // Ruta relativa a tu mismo servidor
+        const API_BASE = '/api/relax'; 
         const loading = document.getElementById('loading');
+        const authHeaders = { 'x-api-key': API_KEY };
 
         // --- 1. CARGAR PLAYLIST ---
         async function loadPlaylist() {
             try {
-                const res = await axios.get(`${API_BASE}/playlist`, { headers: { 'x-api-key': API_KEY } });
+                const res = await axios.get(`${API_BASE}/playlist`, { headers: authHeaders });
                 renderPlaylist(res.data);
             } catch (error) {
-                alert("Error cargando playlist: " + (error.response?.data?.error || error.message));
+                handleError("Error cargando playlist", error);
             }
         }
 
@@ -129,7 +152,6 @@
             handle: '.handle',
             animation: 150,
             onEnd: async function () {
-                // Al terminar de arrastrar, guardamos el nuevo orden
                 const newOrderItems = [];
                 document.querySelectorAll('.playlist-item').forEach((el, index) => {
                     newOrderItems.push({ uuid: el.dataset.uuid, order: index + 1 });
@@ -137,10 +159,9 @@
 
                 loading.style.display = 'flex';
                 try {
-                    await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: { 'x-api-key': API_KEY } });
-                    console.log("Orden actualizado");
+                    await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: authHeaders });
                 } catch (error) {
-                    alert("Error guardando el orden");
+                    handleError("Error guardando el orden", error);
                     loadPlaylist(); // Revertir si falló
                 }
                 loading.style.display = 'none';
@@ -174,27 +195,47 @@
                 await axios.post(`${API_BASE}/upload`, formData, {
                     headers: { 'x-api-key': API_KEY, 'Content-Type': 'multipart/form-data' }
                 });
-                alert("✅ ¡Archivo subido con éxito!");
-                document.getElementById('titleInput').value = ''; // Limpiar form
+                alert("✅ ¡Archivo subido con éxito! Haz clic en 'PUBLICAR' para ponerlo al aire.");
+                document.getElementById('titleInput').value = '';
                 fileInput.value = '';
-                loadPlaylist(); // Recargar lista
+                loadPlaylist();
             } catch (error) {
-                alert("❌ Error en la subida: " + (error.response?.data?.error || error.message));
+                handleError("Error en la subida", error);
             }
             loading.style.display = 'none';
         }
 
         // --- 4. ELIMINAR ---
         async function deleteTrack(uuid) {
-            if (!confirm("¿Seguro que quieres eliminar este audio de la radio?")) return;
+            if (!confirm("¿Seguro que quieres eliminar este audio? (Recuerda Publicar para que se aplique)")) return;
             loading.style.display = 'flex';
             try {
-                await axios.delete(`${API_BASE}/track/${uuid}`, { headers: { 'x-api-key': API_KEY } });
+                await axios.delete(`${API_BASE}/track/${uuid}`, { headers: authHeaders });
                 loadPlaylist();
             } catch (error) {
-                alert("Error al eliminar");
+                handleError("Error al eliminar", error);
             }
             loading.style.display = 'none';
+        }
+
+        // --- 5. ¡¡NUEVA FUNCIÓN DE PUBLICAR!! ---
+        document.getElementById('publish-btn').onclick = async () => {
+            if (!confirm("¿Estás seguro?\nEsto reiniciará el stream en vivo (1-2 segundos de silencio) para aplicar todos tus cambios.")) return;
+            
+            loading.style.display = 'flex';
+            try {
+                const res = await axios.post(`${API_BASE}/publish`, {}, { headers: authHeaders });
+                alert(`✅ ¡Éxito! ${res.data.message}`);
+            } catch (error) {
+                handleError("Error al Publicar", error);
+            }
+            loading.style.display = 'none';
+        };
+        
+        // --- Helper de Errores ---
+        function handleError(message, error) {
+            console.error(message, error);
+            alert(`❌ ${message}: ${error.response?.data?.error || error.message}`);
         }
 
         // Iniciar cargando la lista

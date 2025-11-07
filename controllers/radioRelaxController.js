@@ -2,8 +2,9 @@ const PlaylistItem = require('../models/playlistItem');
 const { v4: uuidv4 } = require('uuid');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
+const axios = require('axios'); // <-- ¡Necesario para llamar al Servidor B!
 
-// Configura Cloudinary con tus credenciales del .env
+// Configura Cloudinary (como antes)
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -11,7 +12,7 @@ cloudinary.config({
 });
 
 // --- 1. FUNCIÓN MÁGICA: Genera el playlist.txt en vivo ---
-// El Servidor B llamará a esta URL para saber qué tocar.
+// (Sin cambios)
 exports.getLivePlaylistTxt = async (req, res) => {
     try {
         const playlist = await PlaylistItem.find({ isActive: true }).sort({ order: 1 });
@@ -22,7 +23,6 @@ exports.getLivePlaylistTxt = async (req, res) => {
             content += `duration ${item.duration}\n`;
         });
 
-        // Si la lista está vacía, evitamos que FFmpeg crashee
         if (playlist.length === 0) {
             content += "# Playlist vacia\n";
         }
@@ -36,6 +36,7 @@ exports.getLivePlaylistTxt = async (req, res) => {
 };
 
 // --- 2. API para el Frontend (JSON) ---
+// (Sin cambios)
 exports.getPlaylistJson = async (req, res) => {
     try {
         const playlist = await PlaylistItem.find({ isActive: true }).sort({ order: 1 });
@@ -46,11 +47,11 @@ exports.getPlaylistJson = async (req, res) => {
 };
 
 // --- 3. Subir Canción (Drag & Drop) ---
+// (Sin cambios)
 exports.uploadTrack = async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No hay archivo de audio" });
 
-        // Subir a Cloudinary (usando resource_type: 'video' para audio es lo recomendado)
         const result = await cloudinary.uploader.upload(req.file.path, {
             resource_type: "video",
             folder: "radio_relax",
@@ -58,19 +59,16 @@ exports.uploadTrack = async (req, res) => {
             unique_filename: false
         });
 
-        // Eliminar archivo temporal local
         fs.unlinkSync(req.file.path);
 
-        // Calcular el nuevo orden (al final de la lista)
         const lastItem = await PlaylistItem.findOne().sort({ order: -1 });
         const newOrder = (lastItem && lastItem.order) ? lastItem.order + 1 : 1;
 
-        // Guardar en DB
         const newItem = new PlaylistItem({
             uuid: uuidv4(),
             title: req.body.title || req.file.originalname.replace(/\.[^/.]+$/, ""),
             audioUrl: result.secure_url,
-            duration: result.duration || 0, // Cloudinary suele devolver la duración
+            duration: result.duration || 0,
             type: req.body.type || 'song',
             order: newOrder
         });
@@ -84,9 +82,10 @@ exports.uploadTrack = async (req, res) => {
 };
 
 // --- 4. Reordenar Playlist ---
+// (Sin cambios)
 exports.reorderPlaylist = async (req, res) => {
     try {
-        const { items } = req.body; // Espera array de { uuid, order }
+        const { items } = req.body;
         const operations = items.map(item => ({
             updateOne: {
                 filter: { uuid: item.uuid },
@@ -101,11 +100,44 @@ exports.reorderPlaylist = async (req, res) => {
 };
 
 // --- 5. Eliminar Canción ---
+// (Sin cambios)
 exports.deleteTrack = async (req, res) => {
     try {
         await PlaylistItem.deleteOne({ uuid: req.params.uuid });
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Error al eliminar" });
+    }
+};
+
+// --- 6. ¡NUEVA FUNCIÓN! "PUBLICAR CAMBIOS" ---
+exports.publishChanges = async (req, res) => {
+    console.log("Servidor A: Recibida orden de 'Publicar Cambios'");
+    
+    // Leemos las variables de entorno para contactar al Servidor B
+    const TRANSMITTER_URL = process.env.TRANSMITTER_URL;
+    const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+
+    if (!TRANSMITTER_URL || !INTERNAL_API_KEY) {
+        console.error("❌ ERROR: Faltan TRANSMITTER_URL o INTERNAL_API_KEY en el Servidor A");
+        return res.status(500).json({ error: "El servidor A no está configurado para contactar al transmisor." });
+    }
+
+    try {
+        // Le enviamos la señal al Servidor B
+        const response = await axios.post(
+            `${TRANSMITTER_URL}/actualizar-playlist`, // La ruta que escucha el Servidor B
+            {}, // No necesita enviar datos, solo la señal
+            {
+                headers: { 'x-api-key': INTERNAL_API_KEY } // La clave secreta
+            }
+        );
+
+        console.log("✅ Servidor A: Señal enviada con éxito. Respuesta del Servidor B:", response.data.message);
+        res.json({ success: true, message: "¡Publicado! El stream se reiniciará en segundos." });
+
+    } catch (error) {
+        console.error("❌ ERROR: El Servidor A no pudo contactar al Servidor B.", error.message);
+        res.status(500).json({ error: "El servidor transmisor (B) no respondió. ¿Está encendido y la URL es correcta?" });
     }
 };
