@@ -4,54 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin LFAF Tech - Radio Relax</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
-        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; --green: #4CAF50; }
+        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; --green: #4CAF50; --blue: #2196F3; --red: #f44336; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        h1, h2 { color: var(--primary); }
+        .container { max-width: 1000px; margin: 0 auto; }
         .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; }
         
-        /* Zona de Drop */
+        /* --- Estilos Generales de UI --- */
+        button { background: var(--primary); color: white; border: none; cursor: pointer; font-weight: 600; padding: 10px 15px; border-radius: 6px; font-size: 0.95rem; transition: all 0.2s; }
+        button:hover { opacity: 0.85; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        input[type="text"], input[type="search"] { padding: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 1rem; width: 100%; box-sizing: border-box; }
+        .btn-green { background: var(--green); }
+        .btn-blue { background: var(--blue); }
+        .btn-red { background: var(--red); }
+        .btn-grey { background: #6c757d; }
+        .btn-small { padding: 5px 10px; font-size: 0.85rem; }
+
+        /* --- Pestañas de Navegación --- */
+        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 25px; }
+        .tab-button { padding: 15px 25px; cursor: pointer; background: none; border: none; font-size: 1.1rem; font-weight: 600; color: #aaa; position: relative; }
+        .tab-button.active { color: var(--primary); }
+        .tab-button.active::after { content: ''; position: absolute; bottom: -2px; left: 0; right: 0; height: 3px; background: var(--primary); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* --- Pestaña 1: Carga Masiva --- */
         #drop-zone { border: 3px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: all 0.3s; }
         #drop-zone.dragover { background: #ffeef4; border-color: var(--primary); transform: scale(1.02); }
-        .form-group { margin-top: 15px; display: flex; gap: 10px; }
-        input, select, button { padding: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 1rem; }
-        button { background: var(--primary); color: white; border: none; cursor: pointer; font-weight: 600; }
-        button:hover { opacity: 0.9; }
+        #upload-queue-container { margin-top: 20px; max-height: 300px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; }
+        .queue-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid #eee; }
+        .queue-item span { font-size: 0.9rem; }
+        .queue-status { font-weight: 700; font-size: 0.9rem; }
+        .status-pending { color: #aaa; }
+        .status-uploading { color: var(--blue); }
+        .status-done { color: var(--green); }
+        .status-error { color: var(--red); }
 
-        /* Playlist */
-        .playlist-item { display: flex; align-items: center; padding: 12px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid #ccc; transition: transform 0.2s; }
-        .playlist-item:hover { transform: translateX(5px); }
-        .playlist-item.song { border-left-color: #2196F3; }
-        .playlist-item.jingle { border-left-color: #FFC107; }
-        .playlist-item.ad { border-left-color: #4CAF50; }
-        .handle { cursor: move; padding: 0 15px; font-size: 1.5rem; color: #999; }
+        /* --- Pestaña 2: Gestor de Playlist --- */
+        .playlist-controls { display: grid; grid-template-columns: 1fr auto; gap: 15px; margin-bottom: 20px; }
+        .playlist-item { display: flex; align-items: center; padding: 12px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px; }
+        .handle { cursor: move; padding: 0 10px; font-size: 1.5rem; color: #999; }
+        .item-checkbox { margin-right: 10px; }
         .info { flex-grow: 1; }
         .meta { font-size: 0.85rem; color: #666; }
-        .delete-btn { background: #ff4444; padding: 8px 12px; font-size: 0.9rem; }
-        
-        /* Botón de Publicar */
-        .publish-bar {
-            background: #333;
-            color: white;
-            padding: 15px 25px;
-            border-radius: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-        #publish-btn {
-            background-color: var(--green);
-            font-size: 1.1rem;
-            padding: 12px 20px;
-        }
+        .actions { display: flex; gap: 8px; }
+        #pagination { margin-top: 20px; display: flex; justify-content: center; align-items: center; gap: 10px; }
 
-        #loading { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(255,255,255,0.8); display: none; justify-content: center; align-items: center; font-size: 2rem; z-index: 999; }
+        /* --- Pestaña 3: Publicación --- */
+        .publish-bar { background: #333; color: white; padding: 20px 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        #publish-btn { font-size: 1.2rem; padding: 15px 25px; }
+        #txt-viewer { background: #2d2d2d; color: #f1f1f1; border-radius: 8px; padding: 15px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 20px; display: none; }
+        #publish-log { background: #f1f1f1; border-radius: 8px; padding: 15px; max-height: 200px; overflow-y: auto; font-size: 0.9rem; }
+
+        #loading { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(255,255,255,0.85); display: none; justify-content: center; align-items: center; font-size: 2rem; z-index: 999; }
     </style>
 </head>
 <body>
@@ -59,47 +68,65 @@
     <div id="loading">⏳ Procesando...</div>
 
     <div class="container">
-        <header>
+        <header style="text-align: center; margin-bottom: 20px;">
             <h1>🎛️ Panel de Control - Radio Relax</h1>
-            <p>Gestiona la programación de tu radio en tiempo real.</p>
         </header>
 
-        <div class="publish-bar">
-            <span>¿Listo para salir al aire?</span>
-            <button id="publish-btn">🚀 PUBLICAR CAMBIOS EN VIVO</button>
-        </div>
+        <nav class="tabs">
+            <button class="tab-button active" onclick="showTab('tab-upload')">📤 Subir Música</button>
+            <button class="tab-button" onclick="showTab('tab-manage')">📋 Gestor de Playlist</button>
+            <button class="tab-button" onclick="showTab('tab-publish')">📡 Publicación</button>
+        </nav>
 
-        <div class="card">
-            <h2>📤 Subir Audio</h2>
-            <div id="drop-zone">
-                <h3>Arrastra tu archivo MP3 aquí</h3>
-                <p>o haz click para seleccionar</p>
-                <input type="file" id="fileInput" accept="audio/*" style="display: none;">
-            </div>
-            <div class="form-group">
-                <input type="text" id="titleInput" placeholder="Título (Opcional)" style="flex: 2;">
-                <select id="typeInput" style="flex: 1;">
-                    <option value="song">🎵 Canción</option>
-                    <option value="jingle">🔔 Jingle/Separador</option>
-                    <option value="ad">📢 Publicidad</option>
-                </select>
-                <button id="uploadBtn">Subir a la Radio</button>
+        <div id="tab-upload" class="tab-content active">
+            <div class="card">
+                <h2>Carga Masiva (Uno por Uno)</h2>
+                <div id="drop-zone">
+                    <h3>Arrastra tus 300+ archivos MP3 aquí</h3>
+                    <p>o haz click para seleccionar</p>
+                    <input type="file" id="fileInput" accept="audio/*" multiple style="display: none;">
+                </div>
+                <div id="upload-queue-container">
+                    <div id="upload-queue"></div>
+                </div>
             </div>
         </div>
 
-        <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                 <h2>📋 Programación Actual</h2>
-                 <button onclick="loadPlaylist()" style="background: #333;">🔄 Actualizar Lista</button>
+        <div id="tab-manage" class="tab-content">
+            <div class="card">
+                <div class="playlist-controls">
+                    <input type="search" id="searchInput" placeholder="Buscar canciones por título...">
+                    <button id="deleteSelectedBtn" class="btn-red">🗑️ Borrar Seleccionados</button>
+                </div>
+                <div id="playlist-container">Cargando...</div>
+                <div id="pagination"></div>
             </div>
-            <p style="color: #666; font-size: 0.9rem;">Arrastra los elementos desde el icono ☰ para cambiar el orden.</p>
-            
-            <div id="playlist-container">Cargando...</div>
+        </div>
+
+        <div id="tab-publish" class="tab-content">
+            <div class="card">
+                <div class="publish-bar">
+                    <span>Publica tus cambios para que salgan al aire.</span>
+                    <button id="publish-btn" class="btn-green">🚀 PUBLICAR CAMBIOS EN VIVO</button>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Ver "Borrador" del TXT</h2>
+                <p>Así es como se verá el `playlist.txt` que tu transmisor descargará cuando publiques.</p>
+                <button id="viewTxtBtn" class="btn-blue">Ver TXT (Borrador)</button>
+                <pre id="txt-viewer"></pre>
+            </div>
+             <div class="card">
+                <h2>Historial de Publicaciones (Log)</h2>
+                <div id="publish-log" style="font-family: monospace;"></div>
+            </div>
         </div>
     </div>
 
     <script>
-        // --- CONFIGURACIÓN ---
+        // --- ============================================= ---
+        // --- CONFIGURACIÓN GLOBAL Y AUTENTICACIÓN          ---
+        // --- ============================================= ---
         const API_KEY = localStorage.getItem('admin_key') || prompt("🔑 Ingresa tu CLAVE DE ADMINISTRADOR:");
         if (API_KEY) localStorage.setItem('admin_key', API_KEY);
 
@@ -107,139 +134,295 @@
         const loading = document.getElementById('loading');
         const authHeaders = { 'x-api-key': API_KEY };
 
-        // --- 1. CARGAR PLAYLIST ---
-        async function loadPlaylist() {
-            try {
-                const res = await axios.get(`${API_BASE}/playlist`, { headers: authHeaders });
-                renderPlaylist(res.data);
-            } catch (error) {
-                handleError("Error cargando playlist", error);
-            }
-        }
+        const uploadQueue = []; // Aquí viven los archivos "En espera"
+        let isUploading = false; // Bloqueo para subir de a uno
 
-        function renderPlaylist(items) {
-            const container = document.getElementById('playlist-container');
-            container.innerHTML = '';
+        // --- ============================================= ---
+        // --- LÓGICA DE PESTAÑAS                          ---
+        // --- ============================================= ---
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            document.querySelector(`.tab-button[onclick="showTab('${tabId}')"]`).classList.add('active');
             
-            if (items.length === 0) {
-                container.innerHTML = '<p>📭 La playlist está vacía. ¡Sube algo!</p>';
-                return;
+            // Cargar la playlist solo cuando se hace clic en la pestaña "Gestionar"
+            if (tabId === 'tab-manage') {
+                loadPlaylist(1); // Cargar página 1
             }
-
-            items.forEach(item => {
-                const div = document.createElement('div');
-                div.className = `playlist-item ${item.type}`;
-                div.dataset.uuid = item.uuid;
-                div.innerHTML = `
-                    <div class="handle">☰</div>
-                    <div class="info">
-                        <strong>${item.title}</strong>
-                        <div class="meta">
-                            ${item.type.toUpperCase()} | ⏱️ ${Math.round(item.duration)}s | 📅 Agregado: ${new Date(item.createdAt).toLocaleDateString()}
-                        </div>
-                    </div>
-                    <div class="actions">
-                        <a href="${item.audioUrl}" target="_blank" style="margin-right: 10px; text-decoration: none;">▶️ Probar</a>
-                        <button class="delete-btn" onclick="deleteTrack('${item.uuid}')">🗑️</button>
-                    </div>
-                `;
-                container.appendChild(div);
-            });
         }
 
-        // --- 2. ACTIVAR DRAG & DROP (ORDENAR) ---
-        new Sortable(document.getElementById('playlist-container'), {
-            handle: '.handle',
-            animation: 150,
-            onEnd: async function () {
-                const newOrderItems = [];
-                document.querySelectorAll('.playlist-item').forEach((el, index) => {
-                    newOrderItems.push({ uuid: el.dataset.uuid, order: index + 1 });
-                });
-
-                loading.style.display = 'flex';
-                try {
-                    await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: authHeaders });
-                } catch (error) {
-                    handleError("Error guardando el orden", error);
-                    loadPlaylist(); // Revertir si falló
-                }
-                loading.style.display = 'none';
-            }
-        });
-
-        // --- 3. SUBIDA DE ARCHIVOS ---
+        // --- ============================================= ---
+        // --- PESTAÑA 1: LÓGICA DE CARGA MASIVA             ---
+        // --- ============================================= ---
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('fileInput');
+        const queueContainer = document.getElementById('upload-queue');
 
         dropZone.onclick = () => fileInput.click();
         dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
         dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+        fileInput.onchange = () => handleFiles(fileInput.files);
         dropZone.ondrop = (e) => {
-            e.preventDefault(); dropZone.classList.remove('dragover');
-            if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
-        };
-        document.getElementById('uploadBtn').onclick = () => {
-            if (fileInput.files.length) handleUpload(fileInput.files[0]);
-            else alert("Primero selecciona un archivo.");
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
         };
 
-        async function handleUpload(file) {
-            loading.style.display = 'flex';
-            const formData = new FormData();
-            formData.append('audio', file);
-            formData.append('title', document.getElementById('titleInput').value);
-            formData.append('type', document.getElementById('typeInput').value);
+        function handleFiles(files) {
+            for (const file of files) {
+                if (file.type.startsWith('audio/')) {
+                    const queueId = `q-${Date.now()}-${Math.random()}`;
+                    uploadQueue.push({ file: file, id: queueId }); // Añadir a la cola
+                    
+                    // Añadir a la UI
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'queue-item';
+                    itemEl.id = queueId;
+                    itemEl.innerHTML = `
+                        <span>${file.name}</span>
+                        <span class="queue-status status-pending">En espera...</span>
+                    `;
+                    queueContainer.appendChild(itemEl);
+                }
+            }
+            processQueue(); // Iniciar el procesamiento de la cola
+        }
 
+        async function processQueue() {
+            if (isUploading || uploadQueue.length === 0) {
+                return; // Si ya hay algo subiendo, o no hay nada en la cola, esperar.
+            }
+            
+            isUploading = true;
+            const job = uploadQueue.shift(); // Tomar el primer item de la cola
+            const itemEl = document.getElementById(job.id);
+            const statusEl = itemEl.querySelector('.queue-status');
+            
             try {
+                statusEl.textContent = 'Subiendo...';
+                statusEl.className = 'queue-status status-uploading';
+
+                const formData = new FormData();
+                formData.append('audio', job.file);
+                // (El título y tipo se quedan por defecto, puedes añadir inputs si quieres)
+
                 await axios.post(`${API_BASE}/upload`, formData, {
                     headers: { 'x-api-key': API_KEY, 'Content-Type': 'multipart/form-data' }
                 });
-                alert("✅ ¡Archivo subido con éxito! Haz clic en 'PUBLICAR' para ponerlo al aire.");
-                document.getElementById('titleInput').value = '';
-                fileInput.value = '';
-                loadPlaylist();
+
+                statusEl.textContent = '¡Completado!';
+                statusEl.className = 'queue-status status-done';
+            
             } catch (error) {
-                handleError("Error en la subida", error);
+                statusEl.textContent = 'Error';
+                statusEl.className = 'queue-status status-error';
+                handleError(`Error subiendo ${job.file.name}`, error, false); // No mostrar alerta, solo log
+            }
+            
+            isUploading = false;
+            processQueue(); // Llamar al siguiente en la cola
+        }
+
+        // --- ============================================= ---
+        // --- PESTAÑA 2: LÓGICA DEL GESTOR DE PLAYLIST      ---
+        // --- ============================================= ---
+        const searchInput = document.getElementById('searchInput');
+        const playlistContainer = document.getElementById('playlist-container');
+        const paginationContainer = document.getElementById('pagination');
+        let sortableInstance = null;
+
+        // Cargar lista (con paginación y búsqueda)
+        async function loadPlaylist(page = 1, query = '') {
+            loading.style.display = 'flex';
+            try {
+                const res = await axios.get(`${API_BASE}/playlist`, {
+                    headers: authHeaders,
+                    params: { pagina: page, query: query }
+                });
+                renderPlaylist(res.data);
+            } catch (error) {
+                handleError("Error cargando la playlist", error);
             }
             loading.style.display = 'none';
         }
 
-        // --- 4. ELIMINAR ---
+        // Renderizar la lista y los botones de paginación
+        function renderPlaylist(data) {
+            playlistContainer.innerHTML = ''; // Limpiar lista
+            
+            // Renderizar items
+            data.items.forEach(item => {
+                const div = document.createElement('div');
+                div.className = `playlist-item ${item.type}`;
+                div.dataset.uuid = item.uuid;
+                div.innerHTML = `
+                    <input type="checkbox" class="item-checkbox" data-uuid="${item.uuid}">
+                    <div class="handle">☰</div>
+                    <div class="info">
+                        <strong>${item.title}</strong>
+                        <div class="meta">
+                            ${item.type.toUpperCase()} | ⏱️ ${Math.round(item.duration)}s | 📅 ${new Date(item.createdAt).toLocaleDateString()}
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <a href="${item.audioUrl}" target="_blank" class="btn-small btn-blue" style="text-decoration: none;">▶️ Escuchar</a>
+                        <button class="btn-small btn-red" onclick="deleteTrack('${item.uuid}')">🗑️ Borrar</button>
+                    </div>
+                `;
+                playlistContainer.appendChild(div);
+            });
+
+            // Renderizar paginación
+            paginationContainer.innerHTML = '';
+            if (data.totalPages > 1) {
+                // Botón "Anterior"
+                const prevBtn = document.createElement('button');
+                prevBtn.textContent = '<< Anterior';
+                prevBtn.disabled = data.currentPage === 1;
+                prevBtn.onclick = () => loadPlaylist(data.currentPage - 1, searchInput.value);
+                paginationContainer.appendChild(prevBtn);
+
+                // Texto "Página X de Y"
+                const pageInfo = document.createElement('span');
+                pageInfo.textContent = `Página ${data.currentPage} de ${data.totalPages}`;
+                paginationContainer.appendChild(pageInfo);
+
+                // Botón "Siguiente"
+                const nextBtn = document.createElement('button');
+                nextBtn.textContent = 'Siguiente >>';
+                nextBtn.disabled = data.currentPage === data.totalPages;
+                nextBtn.onclick = () => loadPlaylist(data.currentPage + 1, searchInput.value);
+                paginationContainer.appendChild(nextBtn);
+            }
+            
+            // (Re)iniciar el Drag & Drop
+            if (sortableInstance) sortableInstance.destroy();
+            sortableInstance = new Sortable(playlistContainer, {
+                handle: '.handle',
+                animation: 150,
+                onEnd: onDragEnd
+            });
+        }
+        
+        // Búsqueda (con "debounce" para no hacer 1000 llamadas)
+        let searchTimeout;
+        searchInput.onkeyup = () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                loadPlaylist(1, searchInput.value);
+            }, 500); // Espera 500ms después de que el usuario deja de teclear
+        };
+        
+        // Guardar orden al arrastrar
+        async function onDragEnd() {
+            const newOrderItems = [];
+            document.querySelectorAll('#playlist-container .playlist-item').forEach((el, index) => {
+                newOrderItems.push({ uuid: el.dataset.uuid, order: index + 1 });
+            });
+
+            loading.style.display = 'flex';
+            try {
+                // NOTA: Esto solo guarda el orden de la página actual.
+                // Para guardar el orden de 300+ canciones, necesitaríamos una lógica más compleja
+                // Por ahora, solo funciona bien si no estás buscando (sort by 'order').
+                await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: authHeaders });
+            } catch (error) {
+                handleError("Error guardando el orden", error);
+            }
+            loading.style.display = 'none';
+        }
+
+        // Borrar una sola canción
         async function deleteTrack(uuid) {
-            if (!confirm("¿Seguro que quieres eliminar este audio? (Recuerda Publicar para que se aplique)")) return;
+            if (!confirm("¿Seguro que quieres eliminar este audio?")) return;
             loading.style.display = 'flex';
             try {
                 await axios.delete(`${API_BASE}/track/${uuid}`, { headers: authHeaders });
-                loadPlaylist();
+                loadPlaylist(1, searchInput.value); // Recargar
             } catch (error) {
                 handleError("Error al eliminar", error);
             }
             loading.style.display = 'none';
         }
 
-        // --- 5. ¡¡NUEVA FUNCIÓN DE PUBLICAR!! ---
+        // Borrado Múltiple
+        document.getElementById('deleteSelectedBtn').onclick = async () => {
+            const selectedUuids = [];
+            document.querySelectorAll('.item-checkbox:checked').forEach(el => {
+                selectedUuids.push(el.dataset.uuid);
+            });
+
+            if (selectedUuids.length === 0) return alert("No has seleccionado ninguna canción.");
+            if (!confirm(`¿Seguro que quieres eliminar ${selectedUuids.length} canciones?`)) return;
+
+            loading.style.display = 'flex';
+            try {
+                await axios.delete(`${API_BASE}/tracks`, { 
+                    headers: authHeaders,
+                    data: { uuids: selectedUuids } // axios 'delete' envía 'data'
+                });
+                loadPlaylist(1, searchInput.value); // Recargar
+            } catch (error) {
+                handleError("Error en borrado múltiple", error);
+            }
+            loading.style.display = 'none';
+        };
+
+        // --- ============================================= ---
+        // --- PESTAÑA 3: LÓGICA DE PUBLICACIÓN              ---
+        // --- ============================================= ---
+        const publishLog = document.getElementById('publish-log');
+
+        function logToPanel(message, isError = false) {
+            const time = new Date().toLocaleTimeString();
+            const color = isError ? 'var(--red)' : 'var(--green)';
+            publishLog.innerHTML = `<div style="color: ${color};">[${time}] ${message}</div>` + publishLog.innerHTML;
+        }
+
+        // Botón "Publicar"
         document.getElementById('publish-btn').onclick = async () => {
-            if (!confirm("¿Estás seguro?\nEsto reiniciará el stream en vivo (1-2 segundos de silencio) para aplicar todos tus cambios.")) return;
+            if (!confirm("¿Estás seguro?\nEsto reiniciará el stream en vivo (1-2s de silencio) para aplicar todos tus cambios.")) return;
             
             loading.style.display = 'flex';
             try {
                 const res = await axios.post(`${API_BASE}/publish`, {}, { headers: authHeaders });
                 alert(`✅ ¡Éxito! ${res.data.message}`);
+                logToPanel(res.data.message);
             } catch (error) {
                 handleError("Error al Publicar", error);
+                logToPanel(error.response?.data?.error || error.message, true);
             }
             loading.style.display = 'none';
         };
+
+        // Botón "Ver TXT (Borrador)"
+        const txtViewer = document.getElementById('txt-viewer');
+        document.getElementById('viewTxtBtn').onclick = async () => {
+            loading.style.display = 'flex';
+            try {
+                const res = await axios.get(`${API_BASE}/playlist.txt`, { headers: authHeaders });
+                txtViewer.textContent = res.data;
+                txtViewer.style.display = 'block';
+            } catch (error) {
+                handleError("Error al cargar el TXT", error);
+            }
+            loading.style.display = 'none';
+        };
+
+        // --- ============================================= ---
+        // --- INICIO Y HELPERS                            ---
+        // --- ============================================= ---
         
-        // --- Helper de Errores ---
-        function handleError(message, error) {
+        // Helper de Errores
+        function handleError(message, error, showAlert = true) {
             console.error(message, error);
-            alert(`❌ ${message}: ${error.response?.data?.error || error.message}`);
+            const errorMsg = error.response?.data?.error || error.message;
+            if (showAlert) alert(`❌ ${message}: ${errorMsg}`);
         }
 
-        // Iniciar cargando la lista
-        loadPlaylist();
+        // Iniciar
+        showTab('tab-upload'); // Empezar en la pestaña de subida
     </script>
 </body>
 </html>

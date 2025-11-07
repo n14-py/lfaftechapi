@@ -1,7 +1,7 @@
 const PlaylistItem = require('../models/playlistItem');
 const { v4: uuidv4 } = require('uuid');
 const cloudinary = require('cloudinary').v2;
-const fs = require('fs'); // Importamos 'fs' normal para manejo de archivos
+const fs = require('fs');
 const axios = require('axios');
 
 // Configura Cloudinary (como antes)
@@ -35,69 +35,95 @@ exports.getLivePlaylistTxt = async (req, res) => {
     }
 };
 
-// --- 2. API para el Frontend (JSON) ---
-// (Sin cambios)
+// --- 2. API para el Frontend (JSON) - ¡¡ACTUALIZADA!! ---
+// Ahora soporta búsqueda por texto, paginación y ordenamiento.
 exports.getPlaylistJson = async (req, res) => {
     try {
-        const playlist = await PlaylistItem.find({ isActive: true }).sort({ order: 1 });
-        res.json(playlist);
+        // Nuevos parámetros desde el query del frontend
+        const { query, limite, pagina } = req.query;
+
+        const limiteNum = parseInt(limite) || 50; // 50 items por página
+        const paginaNum = parseInt(pagina) || 1;
+        const skip = (paginaNum - 1) * limiteNum;
+
+        let filtro = { isActive: true };
+        let sort = { order: 1 }; // Por defecto, ordenar por el orden de la playlist
+        let projection = {};
+
+        // Si el frontend envía una 'query' de búsqueda...
+        if (query && query.trim() !== '') {
+            filtro = {
+                ...filtro,
+                $text: { $search: query } // ¡Usa el índice de texto que creamos!
+            };
+            // Si buscamos, ordenamos por relevancia (el mejor match primero)
+            projection = { score: { $meta: "textScore" } };
+            sort = { score: { $meta: "textScore" } };
+        }
+
+        // Ejecutamos ambas consultas a la vez para máxima velocidad
+        const [items, total] = await Promise.all([
+            PlaylistItem.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum),
+            PlaylistItem.countDocuments(filtro)
+        ]);
+
+        // Devolvemos un objeto de paginación
+        res.json({
+            totalItems: total,
+            totalPages: Math.ceil(total / limiteNum),
+            currentPage: paginaNum,
+            items: items // La lista de canciones de esta página
+        });
+
     } catch (error) {
+        console.error("Error en getPlaylistJson (paginado):", error);
         res.status(500).json({ error: "Error al obtener playlist" });
     }
 };
 
-// --- 3. Subir Canción (CON OPTIMIZACIÓN CORREGIDA) ---
+// --- 3. Subir Canción (Drag & Drop) ---
+// (Con la corrección de 'format: "m4a"' que ya hicimos)
 exports.uploadTrack = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No hay archivo de audio" });
-
-    const localPath = req.file.path; // Guardamos la ruta temporal
+    const localPath = req.file.path;
 
     try {
         console.log(`[Cloudinary] Optimizando y subiendo ${req.file.originalname}...`);
-        
-        // --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
         const result = await cloudinary.uploader.upload(localPath, {
-            resource_type: "video", 
+            resource_type: "video",
             folder: "radio_relax",
-            
-            // Parámetros de optimización:
-            audio_codec: "aac",         // Códec moderno
-            bit_rate: "128k",           // 128kbps (calidad streaming)
-            audio_frequency: 44100,     // Frecuencia estándar
-            format: "m4a"               // <-- ¡ESTA ES LA LÍNEA CORREGIDA!
+            audio_codec: "aac",
+            bit_rate: "128k",
+            audio_frequency: 44100,
+            format: "m4a" // <-- La corrección importante
         });
         
-        console.log(`[Cloudinary] Subida completa. Nuevo tamaño: ${result.bytes} bytes. Nueva URL: ${result.secure_url}`);
-
-        // Calcular el nuevo orden (al final de la lista)
+        console.log(`[Cloudinary] Subida completa. URL: ${result.secure_url}`);
+        
         const lastItem = await PlaylistItem.findOne().sort({ order: -1 });
         const newOrder = (lastItem && lastItem.order) ? lastItem.order + 1 : 1;
 
-        // Guardar en DB
         const newItem = new PlaylistItem({
             uuid: uuidv4(),
             title: req.body.title || req.file.originalname.replace(/\.[^/.]+$/, ""),
-            audioUrl: result.secure_url, // URL del nuevo archivo .m4a
+            audioUrl: result.secure_url,
             duration: result.duration || 0,
             type: req.body.type || 'song',
             order: newOrder
         });
         await newItem.save();
-
         res.json(newItem);
 
     } catch (error) {
         console.error("Error en subida optimizada:", error);
         res.status(500).json({ error: error.message });
     } finally {
-        // Limpieza del archivo temporal
         if (fs.existsSync(localPath)) {
             fs.unlinkSync(localPath);
             console.log(`[Limpieza] Archivo temporal ${localPath} eliminado.`);
         }
     }
 };
-
 
 // --- 4. Reordenar Playlist ---
 // (Sin cambios)
@@ -117,9 +143,9 @@ exports.reorderPlaylist = async (req, res) => {
     }
 };
 
-// --- 5. Eliminar Canción ---
-// (Sin cambios)
-exports.deleteTrack = async (req, res) => {
+// --- 5. Eliminar UNA Canción ---
+// (Cambiamos nombre de 'deleteTrack' a 'deleteTrackByUuid' para ser claros)
+exports.deleteTrackByUuid = async (req, res) => {
     try {
         await PlaylistItem.deleteOne({ uuid: req.params.uuid });
         res.json({ success: true });
@@ -128,7 +154,29 @@ exports.deleteTrack = async (req, res) => {
     }
 };
 
-// --- 6. "PUBLICAR CAMBIOS" ---
+// --- 6. ¡NUEVA FUNCIÓN! Borrado Múltiple ---
+// Esto es para la función de "Selección Múltiple"
+exports.deleteMultipleTracks = async (req, res) => {
+    try {
+        const { uuids } = req.body; // Espera un array de UUIDs
+        if (!Array.isArray(uuids) || uuids.length === 0) {
+            return res.status(400).json({ error: "Se requiere un array de 'uuids'." });
+        }
+        
+        const result = await PlaylistItem.deleteMany({
+            uuid: { $in: uuids } // Borra todos los items cuyo UUID esté en la lista
+        });
+        
+        console.log(`[Borrado Múltiple] ${result.deletedCount} tracks eliminados.`);
+        res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+        console.error("Error en borrado múltiple:", error);
+        res.status(500).json({ error: "Error al eliminar tracks." });
+    }
+};
+
+
+// --- 7. "PUBLICAR CAMBIOS" ---
 // (Sin cambios)
 exports.publishChanges = async (req, res) => {
     console.log("Servidor A: Recibida orden de 'Publicar Cambios'");

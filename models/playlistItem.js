@@ -12,4 +12,8 @@ const PlaylistItemSchema = new mongoose.Schema({
 
 PlaylistItemSchema.index({ order: 1 });
 
+// --- ¡NUEVA LÍNEA! ---
+// Creamos un índice de texto en el 'título' para el buscador
+PlaylistItemSchema.index({ title: 'text' });
+
 module.exports = mongoose.model('PlaylistItem', PlaylistItemSchema);
