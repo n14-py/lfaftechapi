@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 
 // Importamos el "enrutador" principal (que ahora incluye /api/games)
 const apiRoutes = require('./routes/index');
@@ -52,6 +53,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions)); // ¡Usamos las opciones de CORS!
 app.use(express.json());
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // =============================================
 // CONEXIÓN A MONGODB

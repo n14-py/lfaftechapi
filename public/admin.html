@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin LFAF Tech - Radio Relax</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1, h2 { color: var(--primary); }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        
+        /* Zona de Drop */
+        #drop-zone { border: 3px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: all 0.3s; }
+        #drop-zone.dragover { background: #ffeef4; border-color: var(--primary); transform: scale(1.02); }
+        .form-group { margin-top: 15px; display: flex; gap: 10px; }
+        input, select, button { padding: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 1rem; }
+        button { background: var(--primary); color: white; border: none; cursor: pointer; font-weight: 600; }
+        button:hover { opacity: 0.9; }
+
+        /* Playlist */
+        .playlist-item { display: flex; align-items: center; padding: 12px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid #ccc; transition: transform 0.2s; }
+        .playlist-item:hover { transform: translateX(5px); }
+        .playlist-item.song { border-left-color: #2196F3; }
+        .playlist-item.jingle {HN border-left-color: #FFC107; }
+        .playlist-item.ad { border-left-color: #4CAF50; }
+        .handle { cursor: move; padding: 0 15px; font-size: 1.5rem; color: #999; }
+        .info { flex-grow: 1; }
+        .meta { font-size: 0.85rem; color: #666; }
+        .delete-btn { background: #ff4444; padding: 8px 12px; font-size: 0.9rem; }
+
+        #loading { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(255,255,255,0.8); display: none; justify-content: center; align-items: center; font-size: 2rem; z-index: 999; }
+    </style>
+</head>
+<body>
+
+    <div id="loading">⏳ Procesando...</div>
+
+    <div class="container">
+        <header>
+            <h1>🎛️ Panel de Control - Radio Relax</h1>
+            <p>Gestiona la programación de tu radio en tiempo real.</p>
+        </header>
+
+        <div class="card">
+            <h2>📤 Subir Audio</h2>
+            <div id="drop-zone">
+                <h3>Arrastra tu archivo MP3 aquí</h3>
+                <p>o haz click para seleccionar</p>
+                <input type="file" id="fileInput" accept="audio/*" style="display: none;">
+            </div>
+            <div class="form-group">
+                <input type="text" id="titleInput" placeholder="Título (Opcional, usa nombre de archivo si está vacío)" style="flex: 2;">
+                <select id="typeInput" style="flex: 1;">
+                    <option value="song">🎵 Canción</option>
+                    <option value="jingle">🔔 Jingle/Separador</option>
+                    <option value="ad">📢 Publicidad</option>
+                </select>
+                <button id="uploadBtn">Subir a la Radio</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                 <h2>📋 Programación Actual</h2>
+                 <button onclick="loadPlaylist()" style="background: #333;">🔄 Actualizar Lista</button>
+            </div>
+            <p style="color: #666; font-size: 0.9rem;">Arrastra los elementos desde el icono ☰ para cambiar el orden.</p>
+            
+            <div id="playlist-container">Cargando...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN ---
+        // Pedimos la clave al iniciar. En un sistema real, usarías login.
+        const API_KEY = localStorage.getItem('admin_key') || prompt("🔑 Ingresa tu CLAVE DE ADMINISTRADOR:");
+        if (API_KEY) localStorage.setItem('admin_key', API_KEY);
+
+        const API_BASE = '/api/relax'; // Ruta relativa a tu mismo servidor
+        const loading = document.getElementById('loading');
+
+        // --- 1. CARGAR PLAYLIST ---
+        async function loadPlaylist() {
+            try {
+                const res = await axios.get(`${API_BASE}/playlist`, { headers: { 'x-api-key': API_KEY } });
+                renderPlaylist(res.data);
+            } catch (error) {
+                alert("Error cargando playlist: " + (error.response?.data?.error || error.message));
+            }
+        }
+
+        function renderPlaylist(items) {
+            const container = document.getElementById('playlist-container');
+            container.innerHTML = '';
+            
+            if (items.length === 0) {
+                container.innerHTML = '<p>📭 La playlist está vacía. ¡Sube algo!</p>';
+                return;
+            }
+
+            items.forEach(item => {
+                const div = document.createElement('div');
+                div.className = `playlist-item ${item.type}`;
+                div.dataset.uuid = item.uuid;
+                div.innerHTML = `
+                    <div class="handle">☰</div>
+                    <div class="info">
+                        <strong>${item.title}</strong>
+                        <div class="meta">
+                            ${item.type.toUpperCase()} | ⏱️ ${Math.round(item.duration)}s | 📅 Agregado: ${new Date(item.createdAt).toLocaleDateString()}
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <a href="${item.audioUrl}" target="_blank" style="margin-right: 10px; text-decoration: none;">▶️ Probar</a>
+                        <button class="delete-btn" onclick="deleteTrack('${item.uuid}')">🗑️</button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // --- 2. ACTIVAR DRAG & DROP (ORDENAR) ---
+        new Sortable(document.getElementById('playlist-container'), {
+            handle: '.handle',
+            animation: 150,
+            onEnd: async function () {
+                // Al terminar de arrastrar, guardamos el nuevo orden
+                const newOrderItems = [];
+                document.querySelectorAll('.playlist-item').forEach((el, index) => {
+                    newOrderItems.push({ uuid: el.dataset.uuid, order: index + 1 });
+                });
+
+                loading.style.display = 'flex';
+                try {
+                    await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: { 'x-api-key': API_KEY } });
+                    console.log("Orden actualizado");
+                } catch (error) {
+                    alert("Error guardando el orden");
+                    loadPlaylist(); // Revertir si falló
+                }
+                loading.style.display = 'none';
+            }
+        });
+
+        // --- 3. SUBIDA DE ARCHIVOS ---
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.onclick = () => fileInput.click();
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+        dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+        dropZone.ondrop = (e) => {
+            e.preventDefault(); dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
+        };
+        document.getElementById('uploadBtn').onclick = () => {
+            if (fileInput.files.length) handleUpload(fileInput.files[0]);
+            else alert("Primero selecciona un archivo.");
+        };
+
+        async function handleUpload(file) {
+            loading.style.display = 'flex';
+            const formData = new FormData();
+            formData.append('audio', file);
+            formData.append('title', document.getElementById('titleInput').value);
+            formData.append('type', document.getElementById('typeInput').value);
+
+            try {
+                await axios.post(`${API_BASE}/upload`, formData, {
+                    headers: { 'x-api-key': API_KEY, 'Content-Type': 'multipart/form-data' }
+                });
+                alert("✅ ¡Archivo subido con éxito!");
+                document.getElementById('titleInput').value = ''; // Limpiar form
+                fileInput.value = '';
+                loadPlaylist(); // Recargar lista
+            } catch (error) {
+                alert("❌ Error en la subida: " + (error.response?.data?.error || error.message));
+            }
+            loading.style.display = 'none';
+        }
+
+        // --- 4. ELIMINAR ---
+        async function deleteTrack(uuid) {
+            if (!confirm("¿Seguro que quieres eliminar este audio de la radio?")) return;
+            loading.style.display = 'flex';
+            try {
+                await axios.delete(`${API_BASE}/track/${uuid}`, { headers: { 'x-api-key': API_KEY } });
+                loadPlaylist();
+            } catch (error) {
+                alert("Error al eliminar");
+            }
+            loading.style.display = 'none';
+        }
+
+        // Iniciar cargando la lista
+        loadPlaylist();
+    </script>
+</body>
+</html>
