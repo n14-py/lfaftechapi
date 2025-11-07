@@ -46,7 +46,7 @@ exports.getPlaylistJson = async (req, res) => {
     }
 };
 
-// --- 3. Subir Canción (CON OPTIMIZACIÓN) ---
+// --- 3. Subir Canción (CON OPTIMIZACIÓN CORREGIDA) ---
 exports.uploadTrack = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No hay archivo de audio" });
 
@@ -55,18 +55,19 @@ exports.uploadTrack = async (req, res) => {
     try {
         console.log(`[Cloudinary] Optimizando y subiendo ${req.file.originalname}...`);
         
-        // --- ¡AQUÍ ESTÁ LA OPTIMIZACIÓN! ---
+        // --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
         const result = await cloudinary.uploader.upload(localPath, {
-            resource_type: "video", // 'video' es el tipo correcto para procesar audio
+            resource_type: "video", 
             folder: "radio_relax",
             
             // Parámetros de optimización:
-            audio_codec: "aac",    // Códec moderno (mejor que MP3)
-            bit_rate: "128k",      // 128kbps (calidad estándar de streaming)
-            audio_frequency: 44100 // Frecuencia estándar
+            audio_codec: "aac",         // Códec moderno
+            bit_rate: "128k",           // 128kbps (calidad streaming)
+            audio_frequency: 44100,     // Frecuencia estándar
+            format: "m4a"               // <-- ¡ESTA ES LA LÍNEA CORREGIDA!
         });
         
-        console.log(`[Cloudinary] Subida completa. Nuevo tamaño: ${result.bytes} bytes`);
+        console.log(`[Cloudinary] Subida completa. Nuevo tamaño: ${result.bytes} bytes. Nueva URL: ${result.secure_url}`);
 
         // Calcular el nuevo orden (al final de la lista)
         const lastItem = await PlaylistItem.findOne().sort({ order: -1 });
@@ -76,8 +77,8 @@ exports.uploadTrack = async (req, res) => {
         const newItem = new PlaylistItem({
             uuid: uuidv4(),
             title: req.body.title || req.file.originalname.replace(/\.[^/.]+$/, ""),
-            audioUrl: result.secure_url,
-            duration: result.duration || 0, // Cloudinary nos da la duración del nuevo archivo
+            audioUrl: result.secure_url, // URL del nuevo archivo .m4a
+            duration: result.duration || 0,
             type: req.body.type || 'song',
             order: newOrder
         });
@@ -89,9 +90,7 @@ exports.uploadTrack = async (req, res) => {
         console.error("Error en subida optimizada:", error);
         res.status(500).json({ error: error.message });
     } finally {
-        // --- IMPORTANTE: Limpieza ---
-        // Nos aseguramos de borrar el archivo temporal SIEMPRE,
-        // incluso si la subida a Cloudinary falló.
+        // Limpieza del archivo temporal
         if (fs.existsSync(localPath)) {
             fs.unlinkSync(localPath);
             console.log(`[Limpieza] Archivo temporal ${localPath} eliminado.`);
