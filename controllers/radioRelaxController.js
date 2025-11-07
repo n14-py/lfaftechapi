@@ -1,8 +1,8 @@
 const PlaylistItem = require('../models/playlistItem');
 const { v4: uuidv4 } = require('uuid');
 const cloudinary = require('cloudinary').v2;
-const fs = require('fs');
-const axios = require('axios'); // <-- ¡Necesario para llamar al Servidor B!
+const fs = require('fs'); // Importamos 'fs' normal para manejo de archivos
+const axios = require('axios');
 
 // Configura Cloudinary (como antes)
 cloudinary.config({
@@ -46,40 +46,59 @@ exports.getPlaylistJson = async (req, res) => {
     }
 };
 
-// --- 3. Subir Canción (Drag & Drop) ---
-// (Sin cambios)
+// --- 3. Subir Canción (CON OPTIMIZACIÓN) ---
 exports.uploadTrack = async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No hay archivo de audio" });
+
+    const localPath = req.file.path; // Guardamos la ruta temporal
+
     try {
-        if (!req.file) return res.status(400).json({ error: "No hay archivo de audio" });
-
-        const result = await cloudinary.uploader.upload(req.file.path, {
-            resource_type: "video",
+        console.log(`[Cloudinary] Optimizando y subiendo ${req.file.originalname}...`);
+        
+        // --- ¡AQUÍ ESTÁ LA OPTIMIZACIÓN! ---
+        const result = await cloudinary.uploader.upload(localPath, {
+            resource_type: "video", // 'video' es el tipo correcto para procesar audio
             folder: "radio_relax",
-            use_filename: true,
-            unique_filename: false
+            
+            // Parámetros de optimización:
+            audio_codec: "aac",    // Códec moderno (mejor que MP3)
+            bit_rate: "128k",      // 128kbps (calidad estándar de streaming)
+            audio_frequency: 44100 // Frecuencia estándar
         });
+        
+        console.log(`[Cloudinary] Subida completa. Nuevo tamaño: ${result.bytes} bytes`);
 
-        fs.unlinkSync(req.file.path);
-
+        // Calcular el nuevo orden (al final de la lista)
         const lastItem = await PlaylistItem.findOne().sort({ order: -1 });
         const newOrder = (lastItem && lastItem.order) ? lastItem.order + 1 : 1;
 
+        // Guardar en DB
         const newItem = new PlaylistItem({
             uuid: uuidv4(),
             title: req.body.title || req.file.originalname.replace(/\.[^/.]+$/, ""),
             audioUrl: result.secure_url,
-            duration: result.duration || 0,
+            duration: result.duration || 0, // Cloudinary nos da la duración del nuevo archivo
             type: req.body.type || 'song',
             order: newOrder
         });
         await newItem.save();
 
         res.json(newItem);
+
     } catch (error) {
-        console.error("Error en subida:", error);
+        console.error("Error en subida optimizada:", error);
         res.status(500).json({ error: error.message });
+    } finally {
+        // --- IMPORTANTE: Limpieza ---
+        // Nos aseguramos de borrar el archivo temporal SIEMPRE,
+        // incluso si la subida a Cloudinary falló.
+        if (fs.existsSync(localPath)) {
+            fs.unlinkSync(localPath);
+            console.log(`[Limpieza] Archivo temporal ${localPath} eliminado.`);
+        }
     }
 };
+
 
 // --- 4. Reordenar Playlist ---
 // (Sin cambios)
@@ -110,11 +129,11 @@ exports.deleteTrack = async (req, res) => {
     }
 };
 
-// --- 6. ¡NUEVA FUNCIÓN! "PUBLICAR CAMBIOS" ---
+// --- 6. "PUBLICAR CAMBIOS" ---
+// (Sin cambios)
 exports.publishChanges = async (req, res) => {
     console.log("Servidor A: Recibida orden de 'Publicar Cambios'");
     
-    // Leemos las variables de entorno para contactar al Servidor B
     const TRANSMITTER_URL = process.env.TRANSMITTER_URL;
     const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
 
@@ -124,12 +143,11 @@ exports.publishChanges = async (req, res) => {
     }
 
     try {
-        // Le enviamos la señal al Servidor B
         const response = await axios.post(
-            `${TRANSMITTER_URL}/actualizar-playlist`, // La ruta que escucha el Servidor B
-            {}, // No necesita enviar datos, solo la señal
+            `${TRANSMITTER_URL}/actualizar-playlist`, 
+            {}, 
             {
-                headers: { 'x-api-key': INTERNAL_API_KEY } // La clave secreta
+                headers: { 'x-api-key': INTERNAL_API_KEY }
             }
         );
 
