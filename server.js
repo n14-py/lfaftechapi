@@ -25,6 +25,8 @@ const whiteList = [
     'http://127.0.0.1:5500',  // Tu localhost (IP)
     'http://localhost:5500',   // Tu localhost (Nombre)
     'http://127.0.0.1:5501',
+    'http://localhost:3000',
+    'http://192.168.0.4:3000',
     // --- SITIOS EXISTENTES ---
     'https://www.noticias.lat', // Tu sitio de noticias en Vercel
     'https://noticias.lat',
