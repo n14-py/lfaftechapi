@@ -386,14 +386,14 @@ exports.createManualArticle = async (req, res) => {
  * (Se añade al final de articleController.js)
  * (Esta función no cambia)
  */
+
 exports.getSitemap = async (req, res) => {
     // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web
-    const BASE_URL = 'https://noticias.lat'; 
+    const BASE_URL = 'https://noticias.lat'; // URL del Frontend
 
     try {
         // 1. Obtenemos todos los artículos de la DB
-        // Solo necesitamos el ID y la fecha para el sitemap
-        const articles = await Article.find()
+        const articles = await Article.find({ sitio: 'noticias.lat' }) // Filtra por sitio
             .sort({ fecha: -1 })
             .select('_id fecha');
         
@@ -402,12 +402,12 @@ exports.getSitemap = async (req, res) => {
 
         // 2. Añadir Páginas Estáticas (Homepage, Contacto, etc.)
         const staticPages = [
-            { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
-            { loc: 'sobre-nosotros.html', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'contacto.html', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'politica-privacidad.html', priority: '0.50', changefreq: 'yearly' },
-            { loc: 'terminos.html', priority: '0.50', changefreq: 'yearly' },
-        ];
+    { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
+    { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
+    { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
+    { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
+    { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
+];
 
         staticPages.forEach(page => {
             xml += '<url>';
@@ -422,9 +422,9 @@ exports.getSitemap = async (req, res) => {
             const articleDate = new Date(article.fecha).toISOString().split('T')[0];
             xml += '<url>';
             // URL del artículo en el frontend
-            xml += `<loc>${BASE_URL}/articulo.html?id=${article._id}</loc>`; 
+            xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`;
             xml += `<lastmod>${articleDate}</lastmod>`;
-            xml += '<changefreq>weekly</changefreq>'; // Puedes cambiar a 'daily' si actualizas artículos
+            xml += '<changefreq>weekly</changefreq>';
             xml += '<priority>0.90</priority>';
             xml += '</url>';
         });

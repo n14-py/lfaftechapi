@@ -174,10 +174,14 @@ exports.getRadioSitemap = async (req, res) => {
 
         // 2. Añadir Páginas Estáticas
         const staticPages = [
-            { loc: '', priority: '1.00', changefreq: 'hourly' }, 
-            { loc: 'index.html?filtro=generos', priority: '0.90', changefreq: 'daily' },
-            { loc: 'contacto.html', priority: '0.70', changefreq: 'monthly' },
-        ];
+    { loc: '', priority: '1.00', changefreq: 'hourly' }, 
+    { loc: 'generos', priority: '0.90', changefreq: 'daily' },
+    { loc: 'contacto', priority: '0.70', changefreq: 'monthly' },
+    { loc: 'sobre-nosotros', priority: '0.70', changefreq: 'monthly' },
+    { loc: 'preguntas-frecuentes', priority: '0.70', changefreq: 'monthly' },
+    { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
+    { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
+];
 
         staticPages.forEach(page => {
             xml += '<url>';
@@ -191,7 +195,7 @@ exports.getRadioSitemap = async (req, res) => {
         radios.forEach(radio => {
             xml += '<url>';
             // URL del detalle de la radio
-            xml += `<loc>${BASE_URL}/index.html?radio=${radio.uuid}</loc>`; 
+            xml += `<loc>${BASE_URL}/radio/${radio.uuid}</loc>`;
             xml += '<changefreq>weekly</changefreq>';
             xml += '<priority>0.80</priority>';
             xml += '</url>';

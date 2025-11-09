@@ -176,12 +176,12 @@ exports.getSitemap = async (req, res) => {
 
         // 2. Añadir Páginas Estáticas (Homepage, Contacto, etc.)
         const staticPages = [
-            { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
-            { loc: 'sobre-nosotros.html', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'contacto.html', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'politica-privacidad.html', priority: '0.50', changefreq: 'yearly' },
-            { loc: 'terminos.html', priority: '0.50', changefreq: 'yearly' },
-        ];
+    { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
+    { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
+    { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
+    { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
+    { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
+];
 
         staticPages.forEach(page => {
             xml += '<url>';
@@ -196,7 +196,7 @@ exports.getSitemap = async (req, res) => {
             const articleDate = new Date(article.fecha).toISOString().split('T')[0];
             xml += '<url>';
             // URL del artículo en el frontend
-            xml += `<loc>${BASE_URL}/articulo.html?id=${article._id}</loc>`; 
+            xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`;
             xml += `<lastmod>${articleDate}</lastmod>`;
             xml += '<changefreq>weekly</changefreq>';
             xml += '<priority>0.90</priority>';
