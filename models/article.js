@@ -16,12 +16,10 @@ const ArticleSchema = new mongoose.Schema({
     pais: { type: String, index: true, sparse: true },
     
     // El artículo largo generado por la IA
-    articuloGenerado: { type: String, default: null }, // <- Lo ponemos 'default: null'
+    articuloGenerado: { type: String, required: true }, // <- ¡Ahora es 'required'!
 
-    // --- ¡CAMPO NUEVO! ---
     // Este campo nos dirá si el bot de Telegram ya lo publicó.
     telegramPosted: { type: Boolean, default: false, index: true },
-    // --- FIN DEL CAMPO NUEVO ---
 
     fuente: String,
     enlaceOriginal: { type: String, unique: true }, // 'unique:true' evita duplicados
@@ -29,19 +27,17 @@ const ArticleSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // --- ¡ÍNDICE DE BÚSQUEDA! ---
-// (Esto ya lo tenías y está perfecto)
+// (Este es el importante para el buscador público)
 ArticleSchema.index({ 
     titulo: 'text', 
     descripcion: 'text', 
     articuloGenerado: 'text' 
 });
 
-// --- ¡NUEVO ÍNDICE PARA EL ROBOT! ---
-// Esto hace súper rápido que el robot encuentre artículos que necesitan IA.
-ArticleSchema.index({ articuloGenerado: 1 });
-
-// Esto hace súper rápido que el robot de Telegram encuentre artículos listos.
-ArticleSchema.index({ telegramPosted: 1, articuloGenerado: 1 });
+// --- ¡ÍNDICES DE ROBOT ELIMINADOS! ---
+// Ya no necesitamos los índices para 'articuloGenerado: 1'
+// porque el nuevo worker usa una fila en memoria y no consulta la DB
+// para encontrar trabajo.
 // ------------------------------------
 
 

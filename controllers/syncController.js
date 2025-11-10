@@ -1,5 +1,5 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN WORKER (Rápido y Unificado) con AWS BEDROCK! ---
+// --- ¡VERSIÓN WORKER (CON FILA DE MEMORIA) con AWS BEDROCK! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -26,9 +26,14 @@ const PAISES_GNEWS = [
 ];
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// --- Banderas de estado para los Workers ---
-let isNewsWorkerRunning = false; // ¡Ahora solo tenemos UN worker de noticias!
+// --- Banderas de estado y FILA DE MEMORIA ---
+let isNewsWorkerRunning = false;
 let isFetchWorkerRunning = false;
+
+// ¡AQUÍ ESTÁ LA MAGIA!
+// Esta es la fila de espera en memoria.
+let globalArticleQueue = [];
+let articlesProcessedSinceLastTelegram = 0;
 
 
 // =============================================
@@ -37,7 +42,7 @@ let isFetchWorkerRunning = false;
 
 /**
  * [INTERNO / EXPORTADO] Esta es la función de trabajo pesado de RECOLECCIÓN.
- * Solo busca noticias y las guarda "crudas" (sin IA).
+ * Solo busca noticias y las GUARDA EN LA FILA DE MEMORIA (globalArticleQueue).
  */
 const runNewsAPIFetch = async () => {
     // 1. Evitar ejecuciones duplicadas
@@ -52,12 +57,10 @@ const runNewsAPIFetch = async () => {
             console.error("(Recolector) Error: Faltan GNEWS_API_KEY o NEWSDATA_API_KEY.");
             return;
         }
-        console.log(`(Recolector) Iniciando recolección de GNews y NewsData...`);
+        console.log(`(Recolector) Iniciando recolección... Buscando artículos nuevos...`);
 
         let erroresFetch = [];
         let articulosCrudos = []; 
-        let totalObtenidosNewsData = 0;
-        let totalObtenidosGNews = 0;
         
         // --- PASO 1: NEWSDATA.IO ---
         for (const pais of PAISES_NEWSDATA) {
@@ -79,7 +82,6 @@ const runNewsAPIFetch = async () => {
                             paisLocal: paisCodigo
                         });
                     });
-                    totalObtenidosNewsData += response.data.results.length;
                 }
             } catch (e) {
                 console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
@@ -87,7 +89,7 @@ const runNewsAPIFetch = async () => {
             }
             await sleep(1000); 
         }
-        console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${totalObtenidosNewsData}.`);
+        console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${articulosCrudos.length}.`);
 
         // --- PASO 2: GNEWS ---
         for (const pais of PAISES_GNEWS) {
@@ -98,52 +100,38 @@ const runNewsAPIFetch = async () => {
                     if (!article.title || !article.url) return;
                     articulosCrudos.push({ ...article, paisLocal: pais });
                 });
-                totalObtenidosGNews += response.data.articles.length;
             } catch (e) {
                 console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
                 erroresFetch.push(`GNews-${pais}`);
             }
             await sleep(1000);
         }
-        console.log(`(Recolector) -> Total Obtenidos GNews: ${totalObtenidosGNews}.`);
-        console.log(`(Recolector) --- TOTAL: ${articulosCrudos.length} artículos obtenidos.`);
+        console.log(`(Recolector) -> Total Obtenidos GNews (sumados): ${articulosCrudos.length}.`);
 
-        // --- PASO 3: DE-DUPLICACIÓN ---
+        // --- PASO 3: DE-DUPLICACIÓN (Contra DB y contra la FILA actual) ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
-        const articulosExistentes = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
-        const urlsExistentes = new Set(articulosExistentes.map(a => a.enlaceOriginal));
         
-        const articulosNuevos = articulosCrudos.filter(article => !urlsExistentes.has(article.url));
-        console.log(`(Recolector) -> ${urlsExistentes.size} artículos ya existen. ${articulosNuevos.length} artículos son NUEVOS.`);
+        // URLs que ya están en la base de datos
+        const articulosExistentesDB = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
+        const urlsExistentesDB = new Set(articulosExistentesDB.map(a => a.enlaceOriginal));
+        
+        // URLs que ya están en la fila de espera
+        const urlsEnFila = new Set(globalArticleQueue.map(a => a.url));
 
-        // --- PASO 4: GUARDAR EN DB (SIN IA) ---
-        const operations = articulosNuevos.map(article => ({
-            updateOne: {
-                filter: { enlaceOriginal: article.url }, 
-                update: {
-                    $set: {
-                        titulo: article.title,
-                        descripcion: article.description || 'Sin descripción.',
-                        imagen: article.image,
-                        sitio: 'noticias.lat',
-                        // ¡Campos de IA y Telegram se quedan en NULL/false por defecto!
-                        categoria: 'general', // Se asignará por IA después
-                        pais: article.paisLocal,
-                        fuente: article.source.name,
-                        enlaceOriginal: article.url,
-                        fecha: new Date(article.publishedAt),
-                        articuloGenerado: null,     // Se guarda como NULL
-                        telegramPosted: false       // Se guarda como FALSE
-                    }
-                },
-                upsert: true 
-            }
-        }));
+        const articulosNuevos = articulosCrudos.filter(article => {
+            return !urlsExistentesDB.has(article.url) && !urlsEnFila.has(article.url);
+        });
+        
+        console.log(`(Recolector) -> ${articulosCrudos.length} artículos recibidos.`);
+        console.log(`(Recolector) -> ${urlsExistentesDB.size} ya existen en la DB.`);
+        console.log(`(Recolector) -> ${urlsEnFila.size} ya estaban en la fila de espera.`);
+        console.log(`(Recolector) -> ${articulosNuevos.length} artículos son NUEVOS.`);
 
-        if (operations.length > 0) {
-            console.log(`(Recolector) Guardando ${operations.length} artículos NUEVOS (crudos) en la DB...`);
-            const result = await Article.bulkWrite(operations);
-            console.log(`(Recolector) -> ${result.upsertedCount} nuevos artículos guardados.`);
+        // --- PASO 4: AÑADIR A LA FILA DE MEMORIA ---
+        if (articulosNuevos.length > 0) {
+            // ¡No usamos bulkWrite! Los añadimos a la fila
+            globalArticleQueue.push(...articulosNuevos);
+            console.log(`(Recolector) ¡${articulosNuevos.length} artículos nuevos añadidos a la fila! Total en fila: ${globalArticleQueue.length}`);
         }
 
         console.log("(Recolector) ¡Recolección finalizada!");
@@ -164,7 +152,7 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 exports.syncNewsAPIs = async (req, res) => {
     // 1. Responder al usuario INMEDIATAMENTE
     res.json({ 
-        message: "¡Trabajo de RECOLECCIÓN iniciado! Buscando en GNews y NewsData en segundo plano."
+        message: "¡Trabajo de RECOLECCIÓN iniciado! Añadiendo noticias a la fila de procesamiento en segundo plano."
     });
     // 2. Llama a la función real SIN 'await'
     runNewsAPIFetch();
@@ -183,67 +171,87 @@ exports.startNewsWorker = () => {
         console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[News Worker] Iniciando worker UNIFICADO (IA -> Telegram -> Pausa)...");
+    console.log("[News Worker] Iniciando worker (IA -> DB -> Telegram c/11)...");
     isNewsWorkerRunning = true;
     _runNewsWorker(); // Inicia el bucle sin 'await'
 };
 
 /**
- * [INTERNO] El bucle infinito que procesa artículos con IA y los publica, uno por uno.
- * (Esta es la lógica que me pediste, como la de las radios)
+ * [INTERNO] El bucle infinito que procesa artículos de la FILA DE MEMORIA,
+ * los guarda en la DB y los publica en Telegram.
  */
 async function _runNewsWorker() {
     while (isNewsWorkerRunning) { // Bucle infinito
         let articleToProcess = null;
         try {
-            // 1. Buscar un artículo que no tenga IA Y no se haya posteado
-            articleToProcess = await Article.findOne({
-                articuloGenerado: null, // El campo de IA está vacío
-                telegramPosted: false,  // Y no se ha posteado
-                sitio: 'noticias.lat'
-            });
-
-            if (!articleToProcess) {
-                // No hay trabajo, esperamos 5 minutos
-                await sleep(5 * 60 * 1000); 
+            // 1. Buscar un artículo en la FILA DE MEMORIA
+            if (globalArticleQueue.length === 0) {
+                // No hay trabajo, esperamos 1 minuto
+                // console.log("[News Worker] Fila vacía. Durmiendo 1 minuto...");
+                await sleep(1 * 60 * 1000); 
                 continue; // Vuelve al inicio del 'while'
             }
 
-            // 2. ¡Encontramos trabajo! Llamar a AWS Bedrock (IA)
-            console.log(`[News Worker] Paso 1/3: Procesando IA para: ${articleToProcess.titulo}`);
+            // 2. ¡Encontramos trabajo! Tomar el próximo artículo
+            articleToProcess = globalArticleQueue.shift(); // Saca el primero de la fila
+            
+            console.log(`[News Worker] Fila restante: ${globalArticleQueue.length}. Procesando IA para: ${articleToProcess.title}`);
+
+            // 3. Llamar a AWS Bedrock (IA)
             const resultadoIA = await generateArticleContent(articleToProcess);
 
-            // 3. Guardar el resultado (o marcar como fallido)
-            if (resultadoIA) {
-                articleToProcess.articuloGenerado = resultadoIA.articuloGenerado;
-                articleToProcess.categoria = resultadoIA.categoriaSugerida;
+            // 4. Guardar el resultado (o marcar como fallido)
+            if (resultadoIA && resultadoIA.articuloGenerado && resultadoIA.categoriaSugerida) {
                 
-                // 4. ¡ÉXITO! Publicar en Telegram INMEDIATAMENTE
-                console.log(`[News Worker] Paso 2/3: Publicando en Telegram: ${articleToProcess.titulo}`);
-                // Esta función (publicarUnArticulo) se encarga de ENVIAR y MARCAR 'telegramPosted: true'
-                await publicarUnArticulo(articleToProcess); 
+                // 5. ¡ÉXITO! GUARDAR EN LA BASE DE DATOS
+                const newArticle = new Article({
+                    titulo: articleToProcess.title,
+                    descripcion: articleToProcess.description,
+                    imagen: articleToProcess.image,
+                    sitio: 'noticias.lat',
+                    categoria: resultadoIA.categoriaSugerida, // De la IA
+                    pais: articleToProcess.paisLocal,
+                    fuente: articleToProcess.source.name,
+                    enlaceOriginal: articleToProcess.url,
+                    fecha: new Date(articleToProcess.publishedAt),
+                    articuloGenerado: resultadoIA.articuloGenerado, // De la IA
+                    telegramPosted: false // Aún no
+                });
+                
+                // ¡AQUÍ ES DONDE SE GUARDA EN LA DB POR PRIMERA VEZ!
+                await newArticle.save();
+                console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
+
+                // 6. LÓGICA DE TELEGRAM (CADA 11)
+                articlesProcessedSinceLastTelegram++;
+                
+                if (articlesProcessedSinceLastTelegram >= 11) {
+                    console.log(`[News Worker] ¡Artículo #${articlesProcessedSinceLastTelegram}! Enviando a Telegram...`);
+                    // Esta función (publicarUnArticulo) se encarga de ENVIAR y MARCAR 'telegramPosted: true'
+                    await publicarUnArticulo(newArticle); 
+                    articlesProcessedSinceLastTelegram = 0; // Reiniciar contador
+                } else {
+                    console.log(`[News Worker] Artículo #${articlesProcessedSinceLastTelegram}/11. (No se envía a Telegram).`);
+                }
                 
             } else {
-                // Si la IA falla, lo marcamos para no reintentar
-                articleToProcess.articuloGenerado = "FAILED_IA";
-                // No se publica en Telegram porque falló la IA
-                // PERO SÍ lo marcamos como 'telegramPosted: true' para que el bot no lo vuelva a intentar
-                articleToProcess.telegramPosted = true; 
-                console.warn(`[News Worker] Fallo de IA para ${articleToProcess.titulo}. Marcado como FAILED_IA y no se posteará.`);
+                // Si la IA falla, simplemente lo descartamos y no lo guardamos en la DB.
+                console.warn(`[News Worker] Fallo de IA para ${articleToProcess.title}. Artículo descartado, no se guardará en DB.`);
             }
             
-            // 5. Guardar los cambios en la DB (IA + estado de Telegram)
-            await articleToProcess.save();
-            
-            // 6. Pausa de 30 segundos
+            // 7. Pausa de 30 segundos
             // (Esto da 2 artículos por minuto, o 2880 al día. Más rápido que tus 2000)
-            console.log("[News Worker] Paso 3/3: Pausa de 30 segundos...");
+            console.log("[News Worker] Pausa de 30 segundos...");
             await sleep(30 * 1000); 
 
         } catch (error) {
-            console.error(`[News Worker] Error fatal procesando ${articleToProcess?.titulo}: ${error.message}`);
-            // Si la DB falla, esperamos 5 mins antes de reintentar
-            await sleep(5 * 60 * 1000);
+            if (error.code === 11000) {
+                 console.warn(`[News Worker] Error de duplicado al guardar ${articleToProcess?.title}. Saltando.`);
+            } else {
+                console.error(`[News Worker] Error fatal procesando ${articleToProcess?.title}: ${error.message}`);
+            }
+            // Si hay un error, esperamos 1 min antes de reintentar con el siguiente
+            await sleep(1 * 60 * 1000);
         }
     }
 }
@@ -271,7 +279,7 @@ exports.createManualArticle = async (req, res) => {
             return res.status(500).json({ error: "La IA (Bedrock) no pudo procesar la URL proporcionada." });
         }
 
-        // 2. Guardar en la DB (marcado como NO POSTEADO en Telegram)
+        // 2. Guardar en la DB
         const newArticle = new Article({
             titulo: titulo || 'Título no proporcionado (IA)',
             descripcion: descripcion || 'Descripción no proporcionada (IA)',
@@ -283,11 +291,22 @@ exports.createManualArticle = async (req, res) => {
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida,
-            telegramPosted: false // ¡El worker lo encontrará y publicará!
+            telegramPosted: false // Marcado como NO posteado
         });
 
         await newArticle.save();
+        
+        // 3. ¡Publicar en Telegram INMEDIATAMENTE!
+        // (Los artículos manuales no siguen la regla de 1/11, se publican siempre)
+        try {
+            await publicarUnArticulo(newArticle);
+            console.log("Artículo manual publicado en Telegram.");
+        } catch (telegramError) {
+            console.error("Artículo manual guardado, pero falló al enviar a Telegram:", telegramError.message);
+        }
+        
         res.status(201).json(newArticle);
+        
     } catch (error) { 
         if (error.code === 11000) { 
              return res.status(409).json({ error: "Error: Ya existe un artículo con ese enlace original." });
@@ -299,6 +318,7 @@ exports.createManualArticle = async (req, res) => {
 
 /**
  * [PÚBLICO] Generar el Sitemap.xml
+ * (Sin cambios)
  */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat'; 
