@@ -16,7 +16,7 @@ const cacheMiddleware = (req, res, next) => {
 
     if (cache[key] && (Date.now() - cache[key].timestamp < CACHE_DURATION)) {
         // [CACHE HIT] La data está fresca, la servimos inmediatamente.
-        console.log(`[CACHE HIT] Sirviendo ${key} desde caché.`);
+        // console.log(`[CACHE HIT] Sirviendo ${key} desde caché.`); // ¡LOG ELIMINADO!
         return res.json(cache[key].data);
     }
     
@@ -27,7 +27,7 @@ const cacheMiddleware = (req, res, next) => {
             timestamp: Date.now(),
             data: body
         };
-        console.log(`[CACHE MISS] Almacenando ${key} en caché.`);
+        // console.log(`[CACHE MISS] Almacenando ${key} en caché.`); // ¡LOG ELIMINADO!
         // Llamamos al método original para enviar la respuesta al cliente
         res.sendResponse(body);
     };
@@ -57,9 +57,11 @@ const requireAdminKey = (req, res, next) => {
 router.get('/sitemap.xml', articleController.getSitemap);
 
 // GET /api/articles/recommended
-router.get('/articles/recommended', cacheMiddleware, articleController.getRecommendedArticles);
+// ¡¡SOLUCIÓN!! Quitamos el 'cacheMiddleware' de esta ruta.
+router.get('/articles/recommended', articleController.getRecommendedArticles);
 
 // GET /api/articles?sitio=...&categoria=...
+// APLICAMOS EL MIDDLEWARE DE CACHÉ (aquí SÍ es útil)
 router.get('/articles', cacheMiddleware, articleController.getArticles);
 
 // GET /api/article/:id
@@ -69,9 +71,7 @@ router.get('/article/:id', articleController.getArticleById);
 // 4. RUTAS PRIVADAS
 // =============================================
 
-// --- ¡¡RUTA ACTUALIZADA!! ---
-// Esta es la ruta que llamará tu Cron Job 8 veces al día
-// La renombramos de 'sync-gnews' a 'sync-news'
+// Esta es la ruta que llamará tu Cron Interno
 // POST /api/sync-news
 router.post('/sync-news', requireAdminKey, syncController.syncNewsAPIs);
 

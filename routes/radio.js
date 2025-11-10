@@ -16,7 +16,7 @@ const cacheMiddleware = (req, res, next) => {
 
     if (cache[key] && (Date.now() - cache[key].timestamp < CACHE_DURATION)) {
         // [CACHE HIT] La data está fresca, la servimos inmediatamente.
-        console.log(`[CACHE HIT] Sirviendo ${key} desde caché (Radio).`);
+        // console.log(`[CACHE HIT] Sirviendo ${key} desde caché (Radio).`); // ¡LOG ELIMINADO!
         return res.json(cache[key].data);
     }
     
@@ -27,7 +27,7 @@ const cacheMiddleware = (req, res, next) => {
             timestamp: Date.now(),
             data: body
         };
-        console.log(`[CACHE MISS] Almacenando ${key} en caché (Radio).`);
+        // console.log(`[CACHE MISS] Almacenando ${key} en caché (Radio).`); // ¡LOG ELIMINADO!
         // Llamamos al método original para enviar la respuesta al cliente
         res.sendResponse(body);
     };
