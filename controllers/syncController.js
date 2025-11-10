@@ -1,5 +1,6 @@
 // Archivo: lfaftechapi/controllers/syncController.js
 // --- ¡VERSIÓN WORKER (Lento y Seguro) con AWS BEDROCK! ---
+// --- ¡AHORA CON CRON INTERNO! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -29,45 +30,25 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- Banderas de estado para los Workers ---
 let isAIWorkerRunning = false;
 let isTelegramWorkerRunning = false;
-let isFetchWorkerRunning = false;
+let isFetchWorkerRunning = false; // ¡IMPORTANTE! Evita que 2 cron se ejecuten a la vez
 
 
 // =============================================
-// PARTE 1: EL RECOLECTOR (Llamado 8 veces al día)
+// PARTE 1: EL RECOLECTOR (Llamado por Cron Job o API)
 // =============================================
 
 /**
- * [PRIVADO] Esta es la función que llama el Cron Job (8 veces/día).
- * Responde INMEDIATAMENTE y llama al trabajo pesado de RECOLECCIÓN.
+ * [INTERNO / EXPORTADO] Esta es la función de trabajo pesado de RECOLECCIÓN.
+ * Solo busca noticias y las guarda "crudas" (sin IA).
  */
-exports.syncNewsAPIs = async (req, res) => {
-    // 1. Responder al usuario/cron job INMEDIATAMENTE
-    res.json({ 
-        message: "¡Trabajo de RECOLECCIÓN iniciado! Buscando en GNews y NewsData en segundo plano."
-    });
-
-    // 2. Llamar a la función real SIN 'await'
-    // (Asegurarnos de que no se ejecuten dos a la vez)
+const runNewsAPIFetch = async () => {
+    // 1. Evitar ejecuciones duplicadas
     if (isFetchWorkerRunning) {
         console.warn("[RECOLECTOR] Intento de iniciar, pero ya estaba corriendo. Saltando.");
         return;
     }
-    
-    isFetchWorkerRunning = true;
-    try {
-        await _runNewsAPIFetch();
-    } catch (err) {
-        console.error("Error catastrófico en el trabajo de fondo de _runNewsAPIFetch:", err.message);
-    } finally {
-        isFetchWorkerRunning = false;
-    }
-};
+    isFetchWorkerRunning = true; // Bloquea el worker
 
-/**
- * [INTERNO] Esta es la función de trabajo pesado de RECOLECCIÓN.
- * Solo busca noticias y las guarda "crudas" (sin IA).
- */
-async function _runNewsAPIFetch() {
     try {
         if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
             console.error("(Recolector) Error: Faltan GNEWS_API_KEY o NEWSDATA_API_KEY.");
@@ -168,9 +149,26 @@ async function _runNewsAPIFetch() {
         console.log("(Recolector) ¡Recolección finalizada!");
         
     } catch (error) {
-        console.error("(Recolector) Error catastrófico en _runNewsAPIFetch:", error.message);
+        console.error("(Recolector) Error catastrófico en runNewsAPIFetch:", error.message);
+    } finally {
+        isFetchWorkerRunning = false; // Libera el bloqueo
     }
-}
+};
+// ¡LA EXPORTAMOS!
+exports.runNewsAPIFetch = runNewsAPIFetch;
+
+
+/**
+ * [PRIVADO] Esta es la ruta API que puedes llamar manualmente si quieres.
+ */
+exports.syncNewsAPIs = async (req, res) => {
+    // 1. Responder al usuario INMEDIATAMENTE
+    res.json({ 
+        message: "¡Trabajo de RECOLECCIÓN iniciado! Buscando en GNews y NewsData en segundo plano."
+    });
+    // 2. Llama a la función real SIN 'await'
+    runNewsAPIFetch();
+};
 
 
 // =============================================
@@ -192,7 +190,6 @@ exports.startAIWorker = () => {
 
 /**
  * [INTERNO] El bucle infinito que procesa artículos con IA, uno por uno.
- * (Similar al de las radios)
  */
 async function _runAIWorker() {
     while (isAIWorkerRunning) { // Bucle infinito
@@ -225,7 +222,6 @@ async function _runAIWorker() {
             await articleToProcess.save();
             
             // 4. Pausa de 60 segundos (1 minuto por artículo)
-            // Esto nos da 1440 artículos/día. ¡Seguro para tus créditos de AWS!
             await sleep(60 * 1000); 
 
         } catch (error) {
@@ -277,11 +273,9 @@ async function _runTelegramWorker() {
             // 2. ¡Encontramos trabajo! Llamar al bot
             console.log(`[Telegram Worker] Publicando: ${articleToPost.titulo}`);
             
-            // Esta función (que creamos en telegramBot.js)
-            // se encarga de enviar Y marcar 'telegramPosted: true'
             await publicarUnArticulo(articleToPost); 
             
-            // 3. Pausa de 90 segundos entre posts (tu pedido de ~100 al día)
+            // 3. Pausa de 90 segundos entre posts
             await sleep(90 * 1000); 
 
         } catch (error) {
@@ -299,7 +293,6 @@ async function _runTelegramWorker() {
 
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente
- * (Actualizado para usar Bedrock)
  */
 exports.createManualArticle = async (req, res) => {
     try {
@@ -344,7 +337,6 @@ exports.createManualArticle = async (req, res) => {
 
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Esta función no cambia, está perfecta)
  */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat'; 

@@ -6,13 +6,13 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const cron = require('node-cron'); // ¡¡NUEVO!! Importamos el paquete cron
 
 // Importamos el "enrutador" principal
 const apiRoutes = require('./routes/index');
 
-// --- ¡¡NUEVO!! Importamos los controladores de workers ---
+// --- Importamos los controladores de workers ---
 const syncController = require('./controllers/syncController');
-// ---------------------------------------------------
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,12 +58,21 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
       console.log('✅ Conectado a MongoDB Atlas (LFAFTechRed)');
       
-      // --- ¡¡AQUÍ ENCENDEMOS LOS ROBOTS!! ---
-      // Le decimos al servidor que inicie los bucles infinitos
-      // de IA y Telegram en segundo plano.
-      console.log('Iniciando workers automáticos de noticias...');
+      // --- ¡AQUÍ ENCENDEMOS LOS ROBOTS AUTOMÁTICOS! ---
+      
+      // 1. Inicia el robot de IA (Bucle infinito, uno por uno)
       syncController.startAIWorker();
+      
+      // 2. Inicia el robot de Telegram (Bucle infinito, uno por uno)
       syncController.startTelegramWorker();
+
+      // 3. ¡¡NUEVO!! Inicia el CRON JOB de 3 horas
+      console.log("Iniciando Cron Job de Recolección (cada 3 horas)...");
+      cron.schedule('0 */3 * * *', () => {
+          console.log('[Cron Job Interno] ¡Disparado! Ejecutando recolección de noticias...');
+          // Llamamos a la función exportada
+          syncController.runNewsAPIFetch();
+      });
       // ----------------------------------------
       
   })
