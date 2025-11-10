@@ -1,5 +1,5 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN WORKER (CON ROTACIÓN DE CLAVES Y FILA DE MEMORIA)! ---
+// --- ¡VERSIÓN WORKER (CON ROTACIÓN DE CLAVES, FILA DE MEMORIA Y PING A SITEMAP)! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -30,7 +30,7 @@ let isFetchWorkerRunning = false;
 let globalArticleQueue = [];
 let articlesProcessedSinceLastTelegram = 0;
 
-// --- ¡NUEVO! SISTEMA DE ROTACIÓN DE CLAVES ---
+// --- Sistema de Rotación de Claves ---
 const gnewsKeys = [
     process.env.GNEWS_API_KEY,
     process.env.GNEWS_API_KEY_2,
@@ -54,7 +54,6 @@ let currentNewsDataKeyIndex = 0;
 
 /**
  * [INTERNO / EXPORTADO] Esta es la función de trabajo pesado de RECOLECCIÓN.
- * Solo busca noticias y las GUARDA EN LA FILA DE MEMORIA (globalArticleQueue).
  */
 const runNewsAPIFetch = async () => {
     if (isFetchWorkerRunning) {
@@ -63,7 +62,6 @@ const runNewsAPIFetch = async () => {
     }
     isFetchWorkerRunning = true;
 
-    // Reiniciamos los índices de las claves al inicio de cada recolección
     currentGNewsKeyIndex = 0;
     currentNewsDataKeyIndex = 0;
 
@@ -105,27 +103,24 @@ const runNewsAPIFetch = async () => {
                             });
                         });
                     }
-                    success = true; // Si llegamos aquí, la petición fue exitosa
+                    success = true; 
 
                 } catch (e) {
                     const status = e.response?.status;
                     if (status === 429 || status === 401 || status === 403) {
-                        // Error de clave (agotada, inválida, prohibida)
                         console.warn(`(Recolector) NewsData Key #${currentNewsDataKeyIndex + 1} falló (Error ${status}) para [${pais}]. Rotando clave...`);
-                        currentNewsDataKeyIndex = (currentNewsDataKeyIndex + 1) % newsDataKeys.length; // Rota la clave
+                        currentNewsDataKeyIndex = (currentNewsDataKeyIndex + 1) % newsDataKeys.length;
                         attempts++;
-                        await sleep(2000); // Pequeña pausa antes de reintentar con la nueva clave
+                        await sleep(2000); 
                     } else {
-                        // Otro error (timeout, 500, etc.)
                         console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
                         erroresFetch.push(`NewsData-${pais}`);
-                        break; // Salir del 'while' y pasar al siguiente país
+                        break; 
                     }
                 }
-            } // Fin del while
+            } 
             
-            // Pausa de 5 segundos entre países para no saturar la API
-            await sleep(2000); 
+            await sleep(5000); 
         }
         console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${articulosCrudos.length}.`);
 
@@ -145,30 +140,28 @@ const runNewsAPIFetch = async () => {
                         if (!article.title || !article.url) return;
                         articulosCrudos.push({ ...article, paisLocal: pais });
                     });
-                    success = true; // Petición exitosa
+                    success = true; 
 
                 } catch (e) {
                     const status = e.response?.status;
                     if (status === 429 || status === 403 || status === 401) {
-                        // Error de clave (agotada, prohibida, inválida)
                         console.warn(`(Recolector) GNews Key #${currentGNewsKeyIndex + 1} falló (Error ${status}) para [${pais}]. Rotando clave...`);
-                        currentGNewsKeyIndex = (currentGNewsKeyIndex + 1) % gnewsKeys.length; // Rota la clave
+                        currentGNewsKeyIndex = (currentGNewsKeyIndex + 1) % gnewsKeys.length; 
                         attempts++;
-                        await sleep(2000); // Pausa antes de reintentar
+                        await sleep(2000); 
                     } else {
-                        // Otro error
                         console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
                         erroresFetch.push(`GNews-${pais}`);
-                        break; // Salir del 'while' y pasar al siguiente país
+                        break; 
                     }
                 }
-            } // Fin del while
+            }
             
-            await sleep(1000); // Pausa de 1 segundo entre países (GNews es más permisivo)
+            await sleep(1000); 
         }
         console.log(`(Recolector) -> Total Obtenidos (GNews + NewsData): ${articulosCrudos.length}.`);
 
-        // --- PASO 3: DE-DUPLICACIÓN (Contra DB y contra la FILA actual) ---
+        // --- PASO 3: DE-DUPLICACIÓN ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
         
         const articulosExistentesDB = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
@@ -196,15 +189,14 @@ const runNewsAPIFetch = async () => {
     } catch (error) {
         console.error("(Recolector) Error catastrófico en runNewsAPIFetch:", error.message);
     } finally {
-        isFetchWorkerRunning = false; // Libera el bloqueo
+        isFetchWorkerRunning = false;
     }
 };
-// ¡LA EXPORTAMOS!
 exports.runNewsAPIFetch = runNewsAPIFetch;
 
 
 /**
- * [PRIVADO] Esta es la ruta API que puedes llamar manually
+ * [PRIVADO] Esta es la ruta API que puedes llamar manualmente
  */
 exports.syncNewsAPIs = async (req, res) => {
     res.json({ 
@@ -213,11 +205,27 @@ exports.syncNewsAPIs = async (req, res) => {
     runNewsAPIFetch();
 };
 
+// =============================================
+// PARTE 2: EL WORKER DE NOTICIAS UNIFICADO
+// =============================================
 
-// =============================================
-// PARTE 2: EL WORKER DE NOTICIAS UNIFICADO (IA + TELEGRAM)
-// (Esta parte no necesita cambios)
-// =============================================
+/**
+ * [INTERNO] Envía un "ping" a Google para notificar que el sitemap se ha actualizado.
+ * ¡ESTA ES LA NUEVA FUNCIÓN!
+ */
+async function _pingGoogleSitemap() {
+    // Esta es la URL de tu sitemap en el frontend de Vercel
+    const sitemapUrl = 'https://www.noticias.lat/sitemap.xml';
+    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
+    
+    try {
+        await axios.get(pingUrl);
+        console.log(`[News Worker] ¡Sitemap "ping" enviado a Google con éxito!`);
+    } catch (error) {
+        // No detenemos el worker si esto falla, solo avisamos.
+        console.warn(`[News Worker] Falló el "ping" del sitemap a Google: ${error.message}`);
+    }
+}
 
 /**
  * [PRIVADO] Inicia el worker de Noticias
@@ -227,7 +235,7 @@ exports.startNewsWorker = () => {
         console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[News Worker] Iniciando worker (IA -> DB -> Telegram c/11)...");
+    console.log("[News Worker] Iniciando worker (IA -> DB -> Telegram c/11 -> Ping Google)...");
     isNewsWorkerRunning = true;
     _runNewsWorker(); 
 };
@@ -241,7 +249,6 @@ async function _runNewsWorker() {
         try {
             // 1. Buscar un artículo en la FILA DE MEMORIA
             if (globalArticleQueue.length === 0) {
-                // Fila vacía, esperamos 1 minuto
                 await sleep(1 * 60 * 1000); 
                 continue; 
             }
@@ -275,19 +282,24 @@ async function _runNewsWorker() {
                 await newArticle.save();
                 console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
 
-                // 6. LÓGICA DE TELEGRAM (CADA 11)
+                // 6. LÓGICA DE TELEGRAM Y SITEMAP (CADA 11)
                 articlesProcessedSinceLastTelegram++;
                 
                 if (articlesProcessedSinceLastTelegram >= 11) {
-                    console.log(`[News Worker] ¡Artículo #${articlesProcessedSinceLastTelegram}! Enviando a Telegram...`);
+                    console.log(`[News Worker] ¡Artículo #${articlesProcessedSinceLastTelegram}! Enviando a Telegram y Google...`);
+                    
+                    // 1. Enviar a Telegram
                     await publicarUnArticulo(newArticle); 
+                    
+                    // 2. ¡NUEVO! Enviar ping a Google
+                    await _pingGoogleSitemap(); // <-- ¡AQUÍ ESTÁ LA LLAMADA!
+
                     articlesProcessedSinceLastTelegram = 0; // Reiniciar contador
                 } else {
-                    console.log(`[News Worker] Artículo #${articlesProcessedSinceLastTelegram}/11. (No se envía a Telegram).`);
+                    console.log(`[News Worker] Artículo #${articlesProcessedSinceLastTelegram}/11. (No se envía a Telegram ni Google).`);
                 }
                 
             } else {
-                // Si la IA falla, lo descartamos
                 console.warn(`[News Worker] Fallo de IA para ${articleToProcess.title}. Artículo descartado, no se guardará en DB.`);
             }
             
@@ -301,7 +313,6 @@ async function _runNewsWorker() {
             } else {
                 console.error(`[News Worker] Error fatal procesando ${articleToProcess?.title}: ${error.message}`);
             }
-            // Esperamos 1 min antes de reintentar con el siguiente
             await sleep(1 * 60 * 1000);
         }
     }
@@ -310,7 +321,6 @@ async function _runNewsWorker() {
 
 // =============================================
 // PARTE 3: RUTAS MANUALES Y SITEMAP
-// (Sin cambios)
 // =============================================
 
 /**
@@ -346,11 +356,14 @@ exports.createManualArticle = async (req, res) => {
 
         await newArticle.save();
         
+        // --- ¡ACTUALIZADO! ---
+        // Los artículos manuales también avisan a Telegram Y a Google.
         try {
+            console.log("Artículo manual guardado. Enviando a Telegram y Google...");
             await publicarUnArticulo(newArticle);
-            console.log("Artículo manual publicado en Telegram.");
+            await _pingGoogleSitemap(); // <-- ¡AQUÍ TAMBIÉN!
         } catch (telegramError) {
-            console.error("Artículo manual guardado, pero falló al enviar a Telegram:", telegramError.message);
+            console.error("Artículo manual guardado, pero falló al enviar notificaciones:", telegramError.message);
         }
         
         res.status(201).json(newArticle);

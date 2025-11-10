@@ -86,37 +86,33 @@ Directrices estrictas:
 };
 
 
-// --- ¡¡NUEVA FUNCIÓN!! ---
 // --- 4. FUNCIÓN PARA ARTÍCULOS (Tu lógica de DeepSeek, adaptada a Bedrock) ---
 /**
  * Llama a la IA de AWS Bedrock para REESCRIBIR un artículo basado en una URL.
  */
 exports.generateArticleContent = async (article) => {
     
-    // --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
-    // El objeto 'article' de la fila de espera tiene 'url' y 'title',
-    // no 'enlaceOriginal' y 'titulo'.
+    // Corrección para leer 'url' y 'title' de la fila de memoria
     const { url, title } = article;
 
     if (!url || !url.startsWith('http')) {
-        // Usamos 'title' (que sí existe) para el log de error
         console.error(`Error: No se puede procesar "${title}" porque no tiene URL.`);
         return null;
     }
-    // --- FIN DE LA CORRECCIÓN ---
 
-
-    // El prompt que usabas en DeepSeek, ahora como System Prompt para Bedrock
+    // --- ¡¡CAMBIO #1: PROMPT MÁS ESTRICTO!! ---
     const systemPrompt = `Eres un reportero senior para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver un artículo completo.
 
 Tu respuesta DEBE tener el siguiente formato estricto:
 LÍNEA 1: La categoría (UNA SOLA PALABRA de esta lista: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2 (Y SIGUIENTES): El artículo de noticias completo, extenso y profesional (idealmente +500 palabras).
+LÍNEA 2 (Y SIGUIENTES): El artículo de noticias.
 
-NO USES JSON. NO USES MARKDOWN. NO AÑADAS TEXTO ADICIONAL.`;
+REGLAS PARA EL ARTÍCULO:
+1.  **EXTENSIÓN OBLIGATORIA:** El artículo DEBE ser muy extenso. El objetivo es un mínimo de 700 u 800 palabras. Desarrolla la noticia en profundidad, añade contexto, antecedentes y posibles consecuencias. No te limites a resumir.
+2.  **PROFESIONAL:** Debe ser un artículo de noticias completo y profesional.
+3.  **FORMATO:** NO USES JSON. NO USES MARKDOWN. NO AÑADAS TEXTO ADICIONAL.`;
     
-    // Usamos 'url' (la variable corregida)
-    const userPrompt = `Analiza el contenido de este enlace y redáctalo desde cero. Recuerda el formato:
+    const userPrompt = `Analiza el contenido de este enlace y redáctalo desde cero. Recuerda el formato y la regla de extensión (mínimo 700-800 palabras):
 Línea 1: solo la categoría.
 Línea 2 en adelante: el artículo.
 URL: ${url}`;
@@ -127,7 +123,8 @@ URL: ${url}`;
         accept: 'application/json',
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 2048,
+            // --- ¡¡CAMBIO #2: MÁS TOKENS!! ---
+            max_tokens: 4000, // Aumentado de 2048 a 4000
             temperature: 0.5, // Más preciso, menos creativo
             system: systemPrompt,
             messages: [
@@ -169,7 +166,7 @@ URL: ${url}`;
                 return null;
             }
             
-            console.log(`-> IA (Bedrock) generó artículo para ${title} (Cat: ${categoriaSugerida})`);
+            console.log(`-> IA (Bedrock) generó artículo para ${title} (Cat: ${categoriaSugerida}, Longitud: ${articuloGenerado.length})`);
             
             return {
                 categoriaSugerida: categoriaSugerida,
