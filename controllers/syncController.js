@@ -1,5 +1,9 @@
+// Archivo: lfaftechapi/controllers/syncController.js
+
 const axios = require('axios');
 const Article = require('../models/article');
+// ¡NUEVO! Importamos el "cerebro" del bot que creamos
+const { publicarArticulosEnTelegram } = require('../utils/telegramBot');
 
 // --- CARGAMOS LAS 5 API KEYS DE DEEPSEEK ---
 const DEEPSEEK_API_KEYS = [
@@ -41,8 +45,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Llama a la API de DeepSeek.
- * --- ¡VERSIÓN ACTUALIZADA (PLAN D)! ---
- * --- ¡USA URL PERO PIDE TEXTO PLANO CON FORMATO ESTRICTO! ---
  * (Esta función no cambia)
  */
 async function getAIArticle(articleUrl, apiKey) {
@@ -58,7 +60,6 @@ async function getAIArticle(articleUrl, apiKey) {
     };
     
     // --- 1. PROMPT DE SISTEMA (NUEVO) ---
-    // Volvemos al prompt original, pero con una regla de formato
     const systemPrompt = `Eres un reportero senior para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver un artículo completo.
 Tu respuesta DEBE tener el siguiente formato estricto:
 LÍNEA 1: La categoría (UNA SOLA PALABRA de esta lista: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
@@ -89,7 +90,6 @@ URL: ${articleUrl}`;
                 const lines = responseText.split('\n');
                 
                 if (lines.length < 2) {
-                    // Si la IA no siguió el formato (ej: "Lo siento, no puedo acceder...")
                     console.error(`Error: IA no siguió formato (Respuesta: ${responseText}) para ${articleUrl}`);
                     return null;
                 }
@@ -100,22 +100,18 @@ URL: ${articleUrl}`;
                 // LÍNEA 2 Y SIGUIENTES: El artículo
                 let articuloGenerado = lines.slice(1).join('\n').trim();
 
-                // Verificamos si la categoría es válida
                 const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
                 if (!categoriasValidas.includes(categoriaSugerida)) {
-                     // Si la IA puso texto inválido, forzamos "general" y asumimos que la respuesta entera es el artículo
                      console.warn(`Categoría no válida: "${categoriaSugerida}" para ${articleUrl}. Forzando a 'general'.`);
                      categoriaSugerida = "general";
-                     articuloGenerado = responseText; // Usamos la respuesta completa como artículo
+                     articuloGenerado = responseText; 
                 }
                 
-                // Si el artículo está vacío (quizás solo devolvió la categoría)
                 if (!articuloGenerado) {
                     console.error(`Error: IA devolvió categoría pero no artículo para ${articleUrl}`);
                     return null;
                 }
 
-                // ¡ÉXITO! Devolvemos ambas cosas.
                 return {
                     categoriaSugerida: categoriaSugerida,
                     articuloGenerado: articuloGenerado,
@@ -130,8 +126,6 @@ URL: ${articleUrl}`;
         }
         return null;
     } catch (error) {
-        // Este es el error que estabas viendo: "Invalid URL"
-        // Lo más probable es que sea un error de red o un bloqueo de DeepSeek
         console.error(`Error en axios.post para ${articleUrl} (API Key ${apiKey.substring(0, 5)}...):`, error.message);
         return null; 
     }
@@ -140,7 +134,6 @@ URL: ${articleUrl}`;
 
 /**
  * [PRIVADO] Sincronizar Noticias
- * --- ¡VERSIÓN OPTIMIZADA CON AHORRO DE CRÉDITOS! ---
  */
 exports.syncGNews = async (req, res) => {
     try {
@@ -153,11 +146,11 @@ exports.syncGNews = async (req, res) => {
         console.log(`Iniciando sync OPTIMIZADO con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
 
         let erroresFetch = [];
-        let articulosParaIA = []; // Esta es la lista total de APIs
+        let articulosParaIA = []; 
         let totalObtenidosNewsData = 0;
         let totalObtenidosGNews = 0;
         
-        // --- PASO 1: NEWSDATA.IO (Bucle de 19 llamadas) ---
+        // --- PASO 1: NEWSDATA.IO ---
         console.log(`Paso 1: Obteniendo noticias de NewsData.io en ${PAISES_NEWSDATA.length} llamadas...`);
         
         for (const pais of PAISES_NEWSDATA) {
@@ -167,9 +160,7 @@ exports.syncGNews = async (req, res) => {
                 
                 if (response.data.results) {
                     response.data.results.forEach(article => {
-                        // Evitar artículos sin título o URL
                         if (!article.title || !article.link) return;
-                        
                         const paisNombreCompleto = article.country[0];
                         const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
                         
@@ -197,7 +188,7 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> Total Obtenidos NewsData.io: ${totalObtenidosNewsData}.`);
 
 
-        // --- PASO 2: GNEWS (Bucle de 10 llamadas) ---
+        // --- PASO 2: GNEWS ---
         console.log(`Paso 2: Obteniendo noticias de GNews en ${PAISES_GNEWS.length} llamadas...`);
         
         for (const pais of PAISES_GNEWS) {
@@ -206,19 +197,12 @@ exports.syncGNews = async (req, res) => {
                 const response = await axios.get(urlGNews);
                 
                 response.data.articles.forEach(article => {
-                    // GNews a veces trae artículos sin título o URL
                     if (!article.title || !article.url) return;
-                    
-                    articulosParaIA.push({ 
-                        ...article,
-                        categoriaLocal: 'general',
-                        paisLocal: pais
-                    });
+                    articulosParaIA.push({ ...article, categoriaLocal: 'general', paisLocal: pais });
                 });
                 const count = response.data.articles.length;
                 totalObtenidosGNews += count;
                 console.log(`-> [GNews] ${pais.toUpperCase()}: Obtenidos ${count} artículos.`);
-                
             } catch (gnewsError) {
                 console.error(`Error al llamar a GNews para [${pais}]: ${gnewsError.message}`);
                 erroresFetch.push(`GNews-${pais}`);
@@ -228,47 +212,28 @@ exports.syncGNews = async (req, res) => {
         console.log(`-> Total Obtenidos GNews: ${totalObtenidosGNews}.`);
         console.log(`--- TOTAL: ${articulosParaIA.length} artículos obtenidos de las APIs.`);
 
-        // --- ¡¡NUEVO PASO 3: DE-DUPLICACIÓN!! ---
-        // Antes de gastar en IA, vemos cuáles ya tenemos
+        // --- PASO 3: DE-DUPLICACIÓN ---
         console.log(`Paso 3: Verificando duplicados contra la base de datos...`);
-        
-        // 3a. Sacamos todas las URLs que recibimos
         const urlsRecibidas = articulosParaIA.map(article => article.url);
-        
-        // 3b. Buscamos en la DB solo las URLs que coincidan (y solo traemos el enlace)
-        const articulosExistentes = await Article.find({ 
-            enlaceOriginal: { $in: urlsRecibidas } 
-        }).select('enlaceOriginal'); // .select() lo hace súper rápido
-
-        // 3c. Creamos un Set (un objeto de búsqueda rápida) con las URLs que YA TENEMOS
+        const articulosExistentes = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
         const urlsExistentes = new Set(articulosExistentes.map(a => a.enlaceOriginal));
-
-        // 3d. Filtramos la lista, quedándonos SÓLO con los artículos que NO ESTÁN en el Set
         const articulosNuevosParaIA = articulosParaIA.filter(article => !urlsExistentes.has(article.url));
-        
         console.log(`-> ${urlsExistentes.size} artículos ya existen. ${articulosNuevosParaIA.length} artículos son NUEVOS y se enviarán a la IA.`);
 
         // --- PASO 4: IA (CLASIFICACIÓN Y GENERACIÓN) ---
         console.log(`Paso 4: Iniciando generación de IA para ${articulosNuevosParaIA.length} artículos...`);
         
-        // ¡¡IMPORTANTE: Ahora mapeamos la lista FILTRADA!!
         const promesasDeArticulos = articulosNuevosParaIA.map((article, index) => {
             const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
-            
-            // ¡Llamamos a la nueva función de parseo de texto!
             return getAIArticle(article.url, apiKeyParaUsar)
                 .then(resultadoIA => {
-                    // resultadoIA es { categoriaSugerida, articuloGenerado, ... }
                     return { ...article, ...resultadoIA };
                 });
         });
 
         const resultadosCompletos = await Promise.all(promesasDeArticulos);
-        
         const articulosValidosIA = resultadosCompletos.filter(r => r && r.articuloGenerado && r.categoriaSugerida && r.url);
-        
         console.log(`-> ${articulosValidosIA.length} artículos procesados y clasificados por IA.`);
-
 
         // --- PASO 5: Base de Datos ---
         const operations = articulosValidosIA.map(article => ({
@@ -280,12 +245,12 @@ exports.syncGNews = async (req, res) => {
                         descripcion: article.description || 'Sin descripción.',
                         imagen: article.image,
                         sitio: 'noticias.lat',
-                        categoria: article.categoriaSugerida, // Categoría de la IA
+                        categoria: article.categoriaSugerida, 
                         pais: article.paisLocal,
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
                         fecha: new Date(article.publishedAt),
-                        articuloGenerado: article.articuloGenerado // Artículo de la IA
+                        articuloGenerado: article.articuloGenerado 
                     }
                 },
                 upsert: true 
@@ -300,7 +265,25 @@ exports.syncGNews = async (req, res) => {
             console.log(`Paso 5: Guardando ${operations.length} artículos NUEVOS en la base de datos...`);
             const result = await Article.bulkWrite(operations);
             totalArticulosNuevos = result.upsertedCount;
-            totalArticulosActualizados = result.modifiedCount; // Este número ahora debería ser 0
+            totalArticulosActualizados = result.modifiedCount;
+            
+            // --- ¡¡CÓDIGO NUEVO!! ---
+            // ¡SI SE GUARDARON ARTÍCULOS NUEVOS, LOS PUBLICAMOS!
+            if (totalArticulosNuevos > 0) {
+                // 'articulosValidosIA' tiene la lista de artículos que se acaban de guardar
+                // Lo ejecutamos SIN await para no detener la respuesta de la API
+                
+                // Necesitamos pasar los artículos guardados (con el _id) al bot de Telegram
+                // Primero, busquemos los artículos que acabamos de insertar
+                const urlsNuevas = articulosValidosIA.map(a => a.url);
+                const articulosRecienGuardados = await Article.find({ enlaceOriginal: { $in: urlsNuevas } });
+                
+                console.log(`[Telegram] Detectados ${articulosRecienGuardados.length} artículos nuevos. Iniciando bot...`);
+                
+                publicarArticulosEnTelegram(articulosRecienGuardados)
+                    .catch(e => console.error("Error en la publicación de Telegram en segundo plano:", e));
+            }
+            // --- FIN DEL CÓDIGO NUEVO ---
         }
 
         console.log("¡Sincronización con AHORRO DE IA completada!");
@@ -317,21 +300,19 @@ exports.syncGNews = async (req, res) => {
                 totalProcesadosIA_Exitosos: articulosValidosIA.length,
                 totalFallidosIA: articulosNuevosParaIA.length - articulosValidosIA.length,
                 nuevosArticulosGuardadosEnDB: totalArticulosNuevos,
-                articulosActualizadosEnDB: totalArticulosActualizados, // ¡Esto ya no debería pasar!
+                articulosActualizadosEnDB: totalArticulosActualizados,
                 apisConError: erroresFetch
             }
         });
 
     } catch (error) {
         console.error("Error catastrófico en syncGNews (Clasificación IA Texto Plano):", error.message);
-        // --- ¡AQUÍ ESTÁ LA LÍNEA CORREGIDA! ---
         res.status(500).json({ error: "Error al sincronizar (Clasificación IA Texto Plano)." });
     }
 };
 
 /**
- * [PRIVADO] Añadir un nuevo artículo manualmente
- * (Actualizado para usar la clasificación IA de Texto Plano)
+ * [PRIVADO] Añadir un nuevo artículo manually
  * (Esta función no cambia)
  */
 exports.createManualArticle = async (req, res) => {
@@ -342,12 +323,10 @@ exports.createManualArticle = async (req, res) => {
         
         const { titulo, descripcion, imagen, sitio, fuente, enlaceOriginal, fecha, pais } = req.body;
         
-        // El enlace original es OBLIGATORIO para esta función
         if (!enlaceOriginal || !enlaceOriginal.startsWith('http')) {
              return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio para que la IA trabaje." });
         }
         
-        // Llamamos a la IA para que genere y CLASIFIQUE usando la URL
         const resultadoIA = await getAIArticle(enlaceOriginal, DEEPSEEK_API_KEYS[0]);
 
         if (!resultadoIA) {
@@ -363,7 +342,6 @@ exports.createManualArticle = async (req, res) => {
             enlaceOriginal: enlaceOriginal,
             fecha: fecha ? new Date(fecha) : new Date(),
             pais: pais || null,
-            
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida
         });
@@ -383,17 +361,13 @@ exports.createManualArticle = async (req, res) => {
 
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Se añade al final de articleController.js)
  * (Esta función no cambia)
  */
-
 exports.getSitemap = async (req, res) => {
-    // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web
-    const BASE_URL = 'https://noticias.lat'; // URL del Frontend
+    const BASE_URL = 'https://noticias.lat'; 
 
     try {
-        // 1. Obtenemos todos los artículos de la DB
-        const articles = await Article.find({ sitio: 'noticias.lat' }) // Filtra por sitio
+        const articles = await Article.find()
             .sort({ fecha: -1 })
             .select('_id fecha');
         
@@ -402,12 +376,12 @@ exports.getSitemap = async (req, res) => {
 
         // 2. Añadir Páginas Estáticas (Homepage, Contacto, etc.)
         const staticPages = [
-    { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
-    { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
-    { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
-    { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
-    { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
-];
+            { loc: '', priority: '1.00', changefreq: 'daily' }, 
+            { loc: 'sobre-nosotros.html', priority: '0.80', changefreq: 'monthly' },
+            { loc: 'contacto.html', priority: '0.80', changefreq: 'monthly' },
+            { loc: 'politica-privacidad.html', priority: '0.50', changefreq: 'yearly' },
+            { loc: 'terminos.html', priority: '0.50', changefreq: 'yearly' },
+        ];
 
         staticPages.forEach(page => {
             xml += '<url>';
@@ -421,17 +395,15 @@ exports.getSitemap = async (req, res) => {
         articles.forEach(article => {
             const articleDate = new Date(article.fecha).toISOString().split('T')[0];
             xml += '<url>';
-            // URL del artículo en el frontend
-            xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`;
+            xml += `<loc>${BASE_URL}/articulo.html?id=${article._id}</loc>`; 
             xml += `<lastmod>${articleDate}</lastmod>`;
-            xml += '<changefreq>weekly</changefreq>';
+            xml += '<changefreq>weekly</changefreq>'; 
             xml += '<priority>0.90</priority>';
             xml += '</url>';
         });
 
         xml += '</urlset>';
 
-        // 4. Enviar el XML
         res.header('Content-Type', 'application/xml');
         res.send(xml);
 
