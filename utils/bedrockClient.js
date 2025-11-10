@@ -93,12 +93,18 @@ Directrices estrictas:
  */
 exports.generateArticleContent = async (article) => {
     
-    const { enlaceOriginal, titulo } = article;
+    // --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+    // El objeto 'article' de la fila de espera tiene 'url' y 'title',
+    // no 'enlaceOriginal' y 'titulo'.
+    const { url, title } = article;
 
-    if (!enlaceOriginal || !enlaceOriginal.startsWith('http')) {
-        console.error(`Error: No se puede procesar "${titulo}" porque no tiene URL.`);
+    if (!url || !url.startsWith('http')) {
+        // Usamos 'title' (que sí existe) para el log de error
+        console.error(`Error: No se puede procesar "${title}" porque no tiene URL.`);
         return null;
     }
+    // --- FIN DE LA CORRECCIÓN ---
+
 
     // El prompt que usabas en DeepSeek, ahora como System Prompt para Bedrock
     const systemPrompt = `Eres un reportero senior para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver un artículo completo.
@@ -109,10 +115,11 @@ LÍNEA 2 (Y SIGUIENTES): El artículo de noticias completo, extenso y profesiona
 
 NO USES JSON. NO USES MARKDOWN. NO AÑADAS TEXTO ADICIONAL.`;
     
+    // Usamos 'url' (la variable corregida)
     const userPrompt = `Analiza el contenido de este enlace y redáctalo desde cero. Recuerda el formato:
 Línea 1: solo la categoría.
 Línea 2 en adelante: el artículo.
-URL: ${enlaceOriginal}`;
+URL: ${url}`;
 
     const payload = {
         modelId: MODEL_ID,
@@ -143,7 +150,7 @@ URL: ${enlaceOriginal}`;
             // Parseamos la respuesta (Línea 1: Categoria, Línea 2: Artículo)
             const lines = responseText.split('\n');
             if (lines.length < 2) {
-                console.error(`Error: IA (Bedrock) no siguió formato (Respuesta: ${responseText}) para ${enlaceOriginal}`);
+                console.error(`Error: IA (Bedrock) no siguió formato (Respuesta: ${responseText}) para ${url}`);
                 return null;
             }
             
@@ -152,17 +159,17 @@ URL: ${enlaceOriginal}`;
             
             const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
             if (!categoriasValidas.includes(categoriaSugerida)) {
-                 console.warn(`Categoría no válida: "${categoriaSugerida}" para ${enlaceOriginal}. Forzando a 'general'.`);
+                 console.warn(`Categoría no válida: "${categoriaSugerida}" para ${url}. Forzando a 'general'.`);
                  categoriaSugerida = "general";
                  articuloGenerado = responseText; // Usamos todo el texto por si falló el split
             }
             
             if (!articuloGenerado) {
-                console.error(`Error: IA (Bedrock) devolvió categoría pero no artículo para ${enlaceOriginal}`);
+                console.error(`Error: IA (Bedrock) devolvió categoría pero no artículo para ${url}`);
                 return null;
             }
             
-            console.log(`-> IA (Bedrock) generó artículo para ${titulo} (Cat: ${categoriaSugerida})`);
+            console.log(`-> IA (Bedrock) generó artículo para ${title} (Cat: ${categoriaSugerida})`);
             
             return {
                 categoriaSugerida: categoriaSugerida,
@@ -172,7 +179,7 @@ URL: ${enlaceOriginal}`;
         return null;
 
     } catch (error) {
-        console.error(`Error al invocar Bedrock (${MODEL_ID}) para ${enlaceOriginal}:`, error.message);
+        console.error(`Error al invocar Bedrock (${MODEL_ID}) para ${url}:`, error.message);
         if (error.name === 'AccessDeniedException') {
             console.error(`Error FATAL: ¿Tienes acceso al modelo '${MODEL_ID}' en la región '${AWS_BEDROCK_REGION}'?`);
         }
