@@ -1,18 +1,12 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN RÁPIDA (Promise.all) + SEGUNDO PLANO + TELEGRAM BOT! ---
+// --- ¡VERSIÓN WORKER (Lento y Seguro) con AWS BEDROCK! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
-const { publicarArticulosEnTelegram } = require('../utils/telegramBot');
+const { publicarUnArticulo } = require('../utils/telegramBot');
+const { generateArticleContent } = require('../utils/bedrockClient'); // ¡Usamos AWS!
 
-// --- (Tus constantes originales, no cambian) ---
-const DEEPSEEK_API_KEYS = [
-    process.env.DEEPSEEK_API_KEY_1,
-    process.env.DEEPSEEK_API_KEY_2,
-    process.env.DEEPSEEK_API_KEY_3,
-    process.env.DEEPSEEK_API_KEY_4,
-    process.env.DEEPSEEK_API_KEY_5,
-].filter(Boolean);
+// --- Constantes (Tus APIs de noticias) ---
 const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
 const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY;
 const MAX_ARTICLES_PER_COUNTRY = 10;
@@ -32,116 +26,61 @@ const PAISES_GNEWS = [
 ];
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// --- (Tu función getAIArticle original, no cambia) ---
-async function getAIArticle(articleUrl, apiKey) {
-    if (!articleUrl || !articleUrl.startsWith('http')) return null;
-    if (!apiKey) {
-        console.error("Error: No se proporcionó una API key de DeepSeek.");
-        return null;
-    }
-    const API_URL = 'https://api.deepseek.com/v1/chat/completions';
-    const headers = {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-    };
-    const systemPrompt = `Eres un reportero senior para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver un artículo completo.
-Tu respuesta DEBE tener el siguiente formato estricto:
-LÍNEA 1: La categoría (UNA SOLA PALABRA de esta lista: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2 (Y SIGUIENTES): El artículo de noticias completo, extenso y profesional (idealmente +500 palabras).
-NO USES JSON. NO USES MARKDOWN. NO AÑADAS TEXTO ADICIONAL.`;
-    const userPrompt = `Analiza el contenido de este enlace y redáctalo desde cero. Recuerda el formato:
-Línea 1: solo la categoría.
-Línea 2 en adelante: el artículo.
-URL: ${articleUrl}`;
-    
-    const body = {
-        model: "deepseek-chat",
-        messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ]
-    };
-    
-    try {
-        const response = await axios.post(API_URL, body, { headers });
-        if (response.data.choices && response.data.choices.length > 0) {
-            let responseText = response.data.choices[0].message.content;
-            try {
-                const lines = responseText.split('\n');
-                if (lines.length < 2) {
-                    console.error(`Error: IA no siguió formato (Respuesta: ${responseText}) para ${articleUrl}`);
-                    return null;
-                }
-                let categoriaSugerida = lines[0].trim().toLowerCase();
-                let articuloGenerado = lines.slice(1).join('\n').trim();
-                const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
-                if (!categoriasValidas.includes(categoriaSugerida)) {
-                     console.warn(`Categoría no válida: "${categoriaSugerida}" para ${articleUrl}. Forzando a 'general'.`);
-                     categoriaSugerida = "general";
-                     articuloGenerado = responseText; 
-                }
-                if (!articuloGenerado) {
-                    console.error(`Error: IA devolvió categoría pero no artículo para ${articleUrl}`);
-                    return null;
-                }
-                return {
-                    categoriaSugerida: categoriaSugerida,
-                    articuloGenerado: articuloGenerado,
-                    originalArticle: articleUrl
-                };
-            } catch (e) {
-                console.error(`Error al parsear respuesta de IA para ${articleUrl}:`, e.message);
-                return null;
-            }
-        }
-        return null;
-    } catch (error) {
-        console.error(`Error en axios.post para ${articleUrl} (API Key ${apiKey.substring(0, 5)}...):`, error.message);
-        return null; 
-    }
-}
+// --- Banderas de estado para los Workers ---
+let isAIWorkerRunning = false;
+let isTelegramWorkerRunning = false;
+let isFetchWorkerRunning = false;
 
-// --- ¡INICIO DE LA SOLUCIÓN! (Evita el 502) ---
+
+// =============================================
+// PARTE 1: EL RECOLECTOR (Llamado 8 veces al día)
+// =============================================
 
 /**
- * [PRIVADO] Esta es la función que llama el usuario.
- * Responde INMEDIATAMENTE y llama al trabajo pesado.
+ * [PRIVADO] Esta es la función que llama el Cron Job (8 veces/día).
+ * Responde INMEDIATAMENTE y llama al trabajo pesado de RECOLECCIÓN.
  */
-exports.syncGNews = async (req, res) => {
-    // 1. Responde al usuario INMEDIATAMENTE
+exports.syncNewsAPIs = async (req, res) => {
+    // 1. Responder al usuario/cron job INMEDIATAMENTE
     res.json({ 
-        message: "¡Trabajo iniciado! El proceso de sincronización (Pasos 1-7) se está ejecutando en segundo plano. Revisa los logs de Render para ver el progreso."
+        message: "¡Trabajo de RECOLECCIÓN iniciado! Buscando en GNews y NewsData en segundo plano."
     });
 
-    // 2. Llama a la función real SIN 'await'
-    // Esto libera la petición y evita el timeout de 50s
-    _runSyncJob().catch(err => {
-        // Captura cualquier error catastrófico que ocurra en el fondo
-        console.error("Error catastrófico en el trabajo de fondo de syncGNews:", err.message);
-    });
+    // 2. Llamar a la función real SIN 'await'
+    // (Asegurarnos de que no se ejecuten dos a la vez)
+    if (isFetchWorkerRunning) {
+        console.warn("[RECOLECTOR] Intento de iniciar, pero ya estaba corriendo. Saltando.");
+        return;
+    }
+    
+    isFetchWorkerRunning = true;
+    try {
+        await _runNewsAPIFetch();
+    } catch (err) {
+        console.error("Error catastrófico en el trabajo de fondo de _runNewsAPIFetch:", err.message);
+    } finally {
+        isFetchWorkerRunning = false;
+    }
 };
 
 /**
- * [INTERNO] Esta es la función de trabajo pesado.
- * Se ejecuta en segundo plano.
- * ¡USA TU CÓDIGO RÁPIDO ORIGINAL (Promise.all)!
+ * [INTERNO] Esta es la función de trabajo pesado de RECOLECCIÓN.
+ * Solo busca noticias y las guarda "crudas" (sin IA).
  */
-async function _runSyncJob() {
+async function _runNewsAPIFetch() {
     try {
-        if (DEEPSEEK_API_KEYS.length === 0) {
-            console.error("(Fondo) Error: No hay API keys de DeepSeek configuradas.");
-            return;
-        }
         if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
-            console.error("(Fondo) Error: Faltan GNEWS_API_KEY o NEWSDATA_API_KEY en el .env");
+            console.error("(Recolector) Error: Faltan GNEWS_API_KEY o NEWSDATA_API_KEY.");
             return;
         }
-        console.log(`(Fondo) Iniciando sync OPTIMIZADO con ${DEEPSEEK_API_KEYS.length} keys de IA.`);
+        console.log(`(Recolector) Iniciando recolección de GNews y NewsData...`);
 
         let erroresFetch = [];
-        let articulosParaIA = []; 
+        let articulosCrudos = []; 
         let totalObtenidosNewsData = 0;
         let totalObtenidosGNews = 0;
         
         // --- PASO 1: NEWSDATA.IO ---
-        console.log(`(Fondo) Paso 1: Obteniendo noticias de NewsData.io...`);
         for (const pais of PAISES_NEWSDATA) {
              try {
                 const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${pais}&language=es,pt&size=${MAX_ARTICLES_PER_COUNTRY}`;
@@ -151,78 +90,55 @@ async function _runSyncJob() {
                         if (!article.title || !article.link) return;
                         const paisNombreCompleto = article.country[0];
                         const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
-                        articulosParaIA.push({
+                        articulosCrudos.push({
                             title: article.title,
                             description: article.description || 'Sin descripción.',
                             image: article.image_url,
                             source: { name: article.source_id || 'Fuente Desconocida' },
                             url: article.link,
                             publishedAt: article.pubDate,
-                            categoriaLocal: 'general',
                             paisLocal: paisCodigo
                         });
                     });
                     totalObtenidosNewsData += response.data.results.length;
                 }
-            } catch (newsDataError) {
-                console.error(`(Fondo) Error al llamar a NewsData.io para [${pais}]: ${newsDataError.message}`);
-                erroresFetch.push(`NewsData.io-${pais} (${newsDataError.response?.status})`);
+            } catch (e) {
+                console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
+                erroresFetch.push(`NewsData-${pais}`);
             }
             await sleep(1000); 
         }
-        console.log(`(Fondo) -> Total Obtenidos NewsData.io: ${totalObtenidosNewsData}.`);
+        console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${totalObtenidosNewsData}.`);
 
         // --- PASO 2: GNEWS ---
-        console.log(`(Fondo) Paso 2: Obteniendo noticias de GNews...`);
         for (const pais of PAISES_GNEWS) {
              try {
                 const urlGNews = `https://gnews.io/api/v4/top-headlines?country=${pais}&lang=es&max=${MAX_ARTICLES_PER_COUNTRY}&apikey=${API_KEY_GNEWS}`;
                 const response = await axios.get(urlGNews);
                 response.data.articles.forEach(article => {
                     if (!article.title || !article.url) return;
-                    articulosParaIA.push({ ...article, categoriaLocal: 'general', paisLocal: pais });
+                    articulosCrudos.push({ ...article, paisLocal: pais });
                 });
                 totalObtenidosGNews += response.data.articles.length;
-            } catch (gnewsError) {
-                console.error(`(Fondo) Error al llamar a GNews para [${pais}]: ${gnewsError.message}`);
+            } catch (e) {
+                console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
                 erroresFetch.push(`GNews-${pais}`);
             }
             await sleep(1000);
         }
-        console.log(`(Fondo) -> Total Obtenidos GNews: ${totalObtenidosGNews}.`);
-        console.log(`(Fondo) --- TOTAL: ${articulosParaIA.length} artículos obtenidos de las APIs.`);
+        console.log(`(Recolector) -> Total Obtenidos GNews: ${totalObtenidosGNews}.`);
+        console.log(`(Recolector) --- TOTAL: ${articulosCrudos.length} artículos obtenidos.`);
 
         // --- PASO 3: DE-DUPLICACIÓN ---
-        console.log(`(Fondo) Paso 3: Verificando duplicados contra la base de datos...`);
-        const urlsRecibidas = articulosParaIA.map(article => article.url);
+        const urlsRecibidas = articulosCrudos.map(article => article.url);
         const articulosExistentes = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
         const urlsExistentes = new Set(articulosExistentes.map(a => a.enlaceOriginal));
-        const articulosNuevosParaIA = articulosParaIA.filter(article => !urlsExistentes.has(article.url));
-        console.log(`(Fondo) -> ${urlsExistentes.size} artículos ya existen. ${articulosNuevosParaIA.length} artículos son NUEVOS y se enviarán a la IA.`);
-
-        // --- ¡¡TU CÓDIGO RÁPIDO (Promise.all)!! ---
-        console.log(`(Fondo) Paso 4: Iniciando generación de IA para ${articulosNuevosParaIA.length} artículos (EN PARALELO)...`);
         
-        const promesasDeArticulos = articulosNuevosParaIA.map((article, index) => {
-            const apiKeyParaUsar = DEEPSEEK_API_KEYS[index % DEEPSEEK_API_KEYS.length];
-            return getAIArticle(article.url, apiKeyParaUsar)
-                .then(resultadoIA => {
-                    return { ...article, ...resultadoIA };
-                });
-        });
+        const articulosNuevos = articulosCrudos.filter(article => !urlsExistentes.has(article.url));
+        console.log(`(Recolector) -> ${urlsExistentes.size} artículos ya existen. ${articulosNuevos.length} artículos son NUEVOS.`);
 
-        const resultadosCompletos = await Promise.all(promesasDeArticulos);
-        
-        const articulosValidosIA = resultadosCompletos.filter(r => r && r.articuloGenerado && r.categoriaSugerida && r.url);
-        const articulosFallidosIA = articulosNuevosParaIA.length - articulosValidosIA.length;
-
-        console.log(`(Fondo) -> ${articulosValidosIA.length} artículos procesados y clasificados por IA.`);
-        console.log(`(Fondo) -> ${articulosFallidosIA} artículos fallaron en la IA.`);
-        // --- ¡¡FIN DE TU CÓDIGO RÁPIDO!! ---
-
-
-        // --- PASO 5: Base de Datos ---
-        const operations = articulosValidosIA.map(article => ({
+        // --- PASO 4: GUARDAR EN DB (SIN IA) ---
+        const operations = articulosNuevos.map(article => ({
             updateOne: {
                 filter: { enlaceOriginal: article.url }, 
                 update: {
@@ -231,88 +147,176 @@ async function _runSyncJob() {
                         descripcion: article.description || 'Sin descripción.',
                         imagen: article.image,
                         sitio: 'noticias.lat',
-                        categoria: article.categoriaSugerida, 
+                        // ¡Campos de IA y Telegram se quedan en NULL/false por defecto!
+                        categoria: 'general', // Se asignará por IA después
                         pais: article.paisLocal,
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
-                        fecha: new Date(article.publishedAt),
-                        articuloGenerado: article.articuloGenerado 
+                        fecha: new Date(article.publishedAt)
                     }
                 },
                 upsert: true 
             }
         }));
 
-        // --- PASO 6: Guardar y Llamar al Bot de Telegram ---
-        let totalArticulosNuevos = 0;
-        let totalArticulosActualizados = 0;
-        
         if (operations.length > 0) {
-            console.log(`(Fondo) Paso 5: Guardando ${operations.length} artículos NUEVOS en la base de datos...`);
+            console.log(`(Recolector) Guardando ${operations.length} artículos NUEVOS (crudos) en la DB...`);
             const result = await Article.bulkWrite(operations);
-            totalArticulosNuevos = result.upsertedCount;
-            totalArticulosActualizados = result.modifiedCount;
-            
-            if (totalArticulosNuevos > 0) {
-                // Buscamos los artículos recién guardados para obtener sus _ids
-                const urlsNuevas = articulosValidosIA.map(a => a.url);
-                const articulosRecienGuardados = await Article.find({ enlaceOriginal: { $in: urlsNuevas } });
-                
-                console.log(`(Fondo) [Telegram] Detectados ${articulosRecienGuardados.length} artículos nuevos. Iniciando bot...`);
-                
-                // Llamamos al bot de Telegram (sin await, para que siga en fondo)
-                publicarArticulosEnTelegram(articulosRecienGuardados)
-                    .catch(e => console.error("(Fondo) Error en la publicación de Telegram:", e));
-            }
+            console.log(`(Recolector) -> ${result.upsertedCount} nuevos artículos guardados.`);
         }
 
-        console.log("(Fondo) ¡Sincronización con AHORRO DE IA completada!");
+        console.log("(Recolector) ¡Recolección finalizada!");
         
-        // --- PASO 7: Reporte (solo en el Log) ---
-        console.log({ 
-            message: "(Fondo) Sincronización en segundo plano finalizada.",
-            reporte: {
-                totalObtenidosNewsData: totalObtenidosNewsData,
-                totalObtenidosGNews: totalObtenidosGNews,
-                totalArticulosRecibidos: articulosParaIA.length,
-                totalArticulosYaExistentes: urlsExistentes.size,
-                totalArticulosNuevosParaIA: articulosNuevosParaIA.length,
-                totalProcesadosIA_Exitosos: articulosValidosIA.length,
-                totalFallidosIA: articulosFallidosIA,
-                nuevosArticulosGuardadosEnDB: totalArticulosNuevos,
-                articulosActualizadosEnDB: totalArticulosActualizados,
-                apisConError: erroresFetch
-            }
-        });
-
     } catch (error) {
-        // Este es el error final que se mostrará en los logs de Render
-        console.error("(Fondo) Error catastrófico en _runSyncJob (Texto Plano):", error.message);
+        console.error("(Recolector) Error catastrófico en _runNewsAPIFetch:", error.message);
     }
+}
+
+
+// =============================================
+// PARTE 2: EL WORKER DE IA (Se ejecuta 1 vez y corre para siempre)
+// =============================================
+
+/**
+ * [PRIVADO] Inicia el worker de IA (Llamar 1 sola vez al iniciar el server)
+ */
+exports.startAIWorker = () => {
+    if (isAIWorkerRunning) {
+        console.log("[IA Worker] Ya está corriendo.");
+        return;
+    }
+    console.log("[IA Worker] Iniciando worker de IA...");
+    isAIWorkerRunning = true;
+    _runAIWorker(); // Inicia el bucle sin 'await'
 };
 
 /**
+ * [INTERNO] El bucle infinito que procesa artículos con IA, uno por uno.
+ * (Similar al de las radios)
+ */
+async function _runAIWorker() {
+    while (isAIWorkerRunning) { // Bucle infinito
+        let articleToProcess = null;
+        try {
+            // 1. Buscar un artículo que no tenga IA
+            articleToProcess = await Article.findOne({
+                articuloGenerado: null, // El campo de IA está vacío
+                sitio: 'noticias.lat'
+            });
+
+            if (!articleToProcess) {
+                // No hay trabajo, esperamos 5 minutos
+                await sleep(5 * 60 * 1000); 
+                continue; // Vuelve al inicio del 'while'
+            }
+
+            // 2. ¡Encontramos trabajo! Llamar a AWS Bedrock
+            console.log(`[IA Worker] Procesando: ${articleToProcess.titulo}`);
+            const resultadoIA = await generateArticleContent(articleToProcess);
+
+            // 3. Guardar el resultado
+            if (resultadoIA) {
+                articleToProcess.articuloGenerado = resultadoIA.articuloGenerado;
+                articleToProcess.categoria = resultadoIA.categoriaSugerida;
+            } else {
+                // Si la IA falla, lo marcamos para no reintentar
+                articleToProcess.articuloGenerado = "FAILED_IA"; 
+            }
+            await articleToProcess.save();
+            
+            // 4. Pausa de 60 segundos (1 minuto por artículo)
+            // Esto nos da 1440 artículos/día. ¡Seguro para tus créditos de AWS!
+            await sleep(60 * 1000); 
+
+        } catch (error) {
+            console.error(`[IA Worker] Error fatal procesando ${articleToProcess?.titulo}: ${error.message}`);
+            // Si la DB falla, esperamos 5 mins antes de reintentar
+            await sleep(5 * 60 * 1000);
+        }
+    }
+}
+
+
+// =============================================
+// PARTE 3: EL WORKER DE TELEGRAM (Se ejecuta 1 vez y corre para siempre)
+// =============================================
+
+/**
+ * [PRIVADO] Inicia el worker de Telegram (Llamar 1 sola vez al iniciar el server)
+ */
+exports.startTelegramWorker = () => {
+    if (isTelegramWorkerRunning) {
+        console.log("[Telegram Worker] Ya está corriendo.");
+        return;
+    }
+    console.log("[Telegram Worker] Iniciando worker de Telegram...");
+    isTelegramWorkerRunning = true;
+    _runTelegramWorker(); // Inicia el bucle sin 'await'
+};
+
+/**
+ * [INTERNO] El bucle infinito que publica en Telegram, uno por uno.
+ */
+async function _runTelegramWorker() {
+    while (isTelegramWorkerRunning) {
+        let articleToPost = null;
+        try {
+            // 1. Buscar un artículo LISTO para postear
+            articleToPost = await Article.findOne({
+                articuloGenerado: { $ne: null, $ne: "FAILED_IA" }, // IA ya terminó
+                telegramPosted: false, // Aún no se posteó
+                sitio: 'noticias.lat'
+            }).sort({ fecha: 1 }); // Postear el más antiguo primero
+
+            if (!articleToPost) {
+                // No hay trabajo, esperamos 1 minuto
+                await sleep(60 * 1000);
+                continue;
+            }
+
+            // 2. ¡Encontramos trabajo! Llamar al bot
+            console.log(`[Telegram Worker] Publicando: ${articleToPost.titulo}`);
+            
+            // Esta función (que creamos en telegramBot.js)
+            // se encarga de enviar Y marcar 'telegramPosted: true'
+            await publicarUnArticulo(articleToPost); 
+            
+            // 3. Pausa de 90 segundos entre posts (tu pedido de ~100 al día)
+            await sleep(90 * 1000); 
+
+        } catch (error) {
+            console.error(`[Telegram Worker] Error fatal: ${error.message}`);
+            // Si hay un error, esperamos 1 min
+            await sleep(60 * 1000);
+        }
+    }
+}
+
+
+// =============================================
+// PARTE 4: RUTAS MANUALES Y SITEMAP (Actualizadas)
+// =============================================
+
+/**
  * [PRIVADO] Añadir un nuevo artículo manualmente
- * (Esta función no cambia)
+ * (Actualizado para usar Bedrock)
  */
 exports.createManualArticle = async (req, res) => {
     try {
-        if (DEEPSEEK_API_KEYS.length === 0) {
-            return res.status(500).json({ error: "No hay API keys de DeepSeek configuradas." });
-        }
-        
         const { titulo, descripcion, imagen, sitio, fuente, enlaceOriginal, fecha, pais } = req.body;
         
         if (!enlaceOriginal || !enlaceOriginal.startsWith('http')) {
              return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio para que la IA trabaje." });
         }
         
-        const resultadoIA = await getAIArticle(enlaceOriginal, DEEPSEEK_API_KEYS[0]);
+        // 1. Llamar a la IA (Bedrock)
+        const resultadoIA = await generateArticleContent({ enlaceOriginal, titulo });
 
         if (!resultadoIA) {
-            return res.status(500).json({ error: "La IA no pudo procesar la URL proporcionada." });
+            return res.status(500).json({ error: "La IA (Bedrock) no pudo procesar la URL proporcionada." });
         }
 
+        // 2. Guardar en la DB (marcado como NO POSTEADO en Telegram)
         const newArticle = new Article({
             titulo: titulo || 'Título no proporcionado (IA)',
             descripcion: descripcion || 'Descripción no proporcionada (IA)',
@@ -323,7 +327,8 @@ exports.createManualArticle = async (req, res) => {
             fecha: fecha ? new Date(fecha) : new Date(),
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
-            categoria: resultadoIA.categoriaSugerida
+            categoria: resultadoIA.categoriaSugerida,
+            telegramPosted: false // El worker de Telegram lo encontrará
         });
 
         await newArticle.save();
@@ -337,14 +342,11 @@ exports.createManualArticle = async (req, res) => {
     }
 };
 
-
-
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Esta función no cambia)
+ * (Esta función no cambia, está perfecta)
  */
 exports.getSitemap = async (req, res) => {
-    // ¡IMPORTANTE! Asegúrate de que esto esté actualizado a las URLs de Next.js
     const BASE_URL = 'https://noticias.lat'; 
 
     try {
@@ -355,7 +357,6 @@ exports.getSitemap = async (req, res) => {
         let xml = '<?xml version="1.0" encoding="UTF-8"?>';
         xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
 
-        // URLs Estáticas (¡Actualizadas a Next.js!)
         const staticPages = [
             { loc: '', priority: '1.00', changefreq: 'daily' }, 
             { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
@@ -372,7 +373,6 @@ exports.getSitemap = async (req, res) => {
             xml += '</url>';
         });
 
-        // URLs Dinámicas (¡Actualizadas a Next.js!)
         articles.forEach(article => {
             const articleDate = new Date(article.fecha).toISOString().split('T')[0];
             xml += '<url>';
@@ -384,7 +384,6 @@ exports.getSitemap = async (req, res) => {
         });
 
         xml += '</urlset>';
-
         res.header('Content-Type', 'application/xml');
         res.send(xml);
 

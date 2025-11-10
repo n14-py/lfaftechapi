@@ -21,7 +21,7 @@ exports.InvokeModelCommand = InvokeModelCommand; // Exportamos el comando
 
 const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
 
-// --- 3. FUNCIÓN PRINCIPAL (Versión "Creativa") ---
+// --- 3. FUNCIÓN PARA RADIOS (Existente, sin cambios) ---
 /**
  * Llama a la IA de AWS Bedrock para que INVENTE una descripción SEO para una radio.
  */
@@ -82,5 +82,100 @@ Directrices estrictas:
             console.error(`Error FATAL: ¿Tienes acceso al modelo '${MODEL_ID}' en la región '${AWS_BEDROCK_REGION}'? (¿Rellenaste el formulario de Caso de Uso?)`);
         }
         return null;
+    }
+};
+
+
+// --- ¡¡NUEVA FUNCIÓN!! ---
+// --- 4. FUNCIÓN PARA ARTÍCULOS (Tu lógica de DeepSeek, adaptada a Bedrock) ---
+/**
+ * Llama a la IA de AWS Bedrock para REESCRIBIR un artículo basado en una URL.
+ */
+exports.generateArticleContent = async (article) => {
+    
+    const { enlaceOriginal, titulo } = article;
+
+    if (!enlaceOriginal || !enlaceOriginal.startsWith('http')) {
+        console.error(`Error: No se puede procesar "${titulo}" porque no tiene URL.`);
+        return null;
+    }
+
+    // El prompt que usabas en DeepSeek, ahora como System Prompt para Bedrock
+    const systemPrompt = `Eres un reportero senior para 'Noticias.lat'. Tu trabajo es analizar una URL y devolver un artículo completo.
+
+Tu respuesta DEBE tener el siguiente formato estricto:
+LÍNEA 1: La categoría (UNA SOLA PALABRA de esta lista: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
+LÍNEA 2 (Y SIGUIENTES): El artículo de noticias completo, extenso y profesional (idealmente +500 palabras).
+
+NO USES JSON. NO USES MARKDOWN. NO AÑADAS TEXTO ADICIONAL.`;
+    
+    const userPrompt = `Analiza el contenido de este enlace y redáctalo desde cero. Recuerda el formato:
+Línea 1: solo la categoría.
+Línea 2 en adelante: el artículo.
+URL: ${enlaceOriginal}`;
+
+    const payload = {
+        modelId: MODEL_ID,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+            anthropic_version: 'bedrock-2023-05-31',
+            max_tokens: 2048,
+            temperature: 0.5, // Más preciso, menos creativo
+            system: systemPrompt,
+            messages: [
+                {
+                    role: 'user',
+                    content: [{ type: 'text', text: userPrompt }]
+                }
+            ]
+        })
+    };
+
+    try {
+        const command = new InvokeModelCommand(payload);
+        const response = await client.send(command);
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+        if (responseBody.content && responseBody.content.length > 0) {
+            let responseText = responseBody.content[0].text.trim();
+            
+            // Parseamos la respuesta (Línea 1: Categoria, Línea 2: Artículo)
+            const lines = responseText.split('\n');
+            if (lines.length < 2) {
+                console.error(`Error: IA (Bedrock) no siguió formato (Respuesta: ${responseText}) para ${enlaceOriginal}`);
+                return null;
+            }
+            
+            let categoriaSugerida = lines[0].trim().toLowerCase().replace('.', ''); // Limpiamos la categoría
+            let articuloGenerado = lines.slice(1).join('\n').trim();
+            
+            const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
+            if (!categoriasValidas.includes(categoriaSugerida)) {
+                 console.warn(`Categoría no válida: "${categoriaSugerida}" para ${enlaceOriginal}. Forzando a 'general'.`);
+                 categoriaSugerida = "general";
+                 articuloGenerado = responseText; // Usamos todo el texto por si falló el split
+            }
+            
+            if (!articuloGenerado) {
+                console.error(`Error: IA (Bedrock) devolvió categoría pero no artículo para ${enlaceOriginal}`);
+                return null;
+            }
+            
+            console.log(`-> IA (Bedrock) generó artículo para ${titulo} (Cat: ${categoriaSugerida})`);
+            
+            return {
+                categoriaSugerida: categoriaSugerida,
+                articuloGenerado: articuloGenerado
+            };
+        }
+        return null;
+
+    } catch (error) {
+        console.error(`Error al invocar Bedrock (${MODEL_ID}) para ${enlaceOriginal}:`, error.message);
+        if (error.name === 'AccessDeniedException') {
+            console.error(`Error FATAL: ¿Tienes acceso al modelo '${MODEL_ID}' en la región '${AWS_BEDROCK_REGION}'?`);
+        }
+        return null; 
     }
 };

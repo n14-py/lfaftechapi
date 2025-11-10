@@ -53,18 +53,13 @@ const requireAdminKey = (req, res, next) => {
 // 3. RUTAS PÚBLICAS
 // =============================================
 
-// --- ¡¡AQUÍ ESTÁ LA RUTA DEL SITEMAP CORREGIDA!! ---
-// Como 'index.js' usa este router en la raíz '/api',
-// la ruta final seguirá siendo '/api/sitemap.xml'
+// (Esta ruta ya la tenías correcta)
 router.get('/sitemap.xml', articleController.getSitemap);
-// --------------------------------------------------
 
 // GET /api/articles/recommended
-// Se aplica el caché aquí también
 router.get('/articles/recommended', cacheMiddleware, articleController.getRecommendedArticles);
 
 // GET /api/articles?sitio=...&categoria=...
-// APLICAMOS EL MIDDLEWARE DE CACHÉ
 router.get('/articles', cacheMiddleware, articleController.getArticles);
 
 // GET /api/article/:id
@@ -74,10 +69,13 @@ router.get('/article/:id', articleController.getArticleById);
 // 4. RUTAS PRIVADAS
 // =============================================
 
-// POST /api/sync-gnews
-router.post('/sync-gnews', requireAdminKey, syncController.syncGNews);
+// --- ¡¡RUTA ACTUALIZADA!! ---
+// Esta es la ruta que llamará tu Cron Job 8 veces al día
+// La renombramos de 'sync-gnews' a 'sync-news'
+// POST /api/sync-news
+router.post('/sync-news', requireAdminKey, syncController.syncNewsAPIs);
 
-// POST /api/articles
+// POST /api/articles (para crear manual)
 router.post('/articles', requireAdminKey, syncController.createManualArticle);
 
 // Exportamos el router para que server.js pueda usarlo
