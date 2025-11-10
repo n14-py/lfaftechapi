@@ -104,7 +104,7 @@ const runNewsAPIFetch = async () => {
                 console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
                 erroresFetch.push(`GNews-${pais}`);
             }
-            await sleep(1000);
+            await sleep(5000);
         }
         console.log(`(Recolector) -> Total Obtenidos GNews (sumados): ${articulosCrudos.length}.`);
 
