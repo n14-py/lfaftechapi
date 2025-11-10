@@ -1,6 +1,5 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN WORKER (Lento y Seguro) con AWS BEDROCK! ---
-// --- ¡AHORA CON CRON INTERNO! ---
+// --- ¡VERSIÓN WORKER (Rápido y Unificado) con AWS BEDROCK! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -28,9 +27,8 @@ const PAISES_GNEWS = [
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- Banderas de estado para los Workers ---
-let isAIWorkerRunning = false;
-let isTelegramWorkerRunning = false;
-let isFetchWorkerRunning = false; // ¡IMPORTANTE! Evita que 2 cron se ejecuten a la vez
+let isNewsWorkerRunning = false; // ¡Ahora solo tenemos UN worker de noticias!
+let isFetchWorkerRunning = false;
 
 
 // =============================================
@@ -172,27 +170,28 @@ exports.syncNewsAPIs = async (req, res) => {
 
 
 // =============================================
-// PARTE 2: EL WORKER DE IA (Se ejecuta 1 vez y corre para siempre)
+// PARTE 2: EL WORKER DE NOTICIAS UNIFICADO (IA + TELEGRAM)
 // =============================================
 
 /**
- * [PRIVADO] Inicia el worker de IA (Llamar 1 sola vez al iniciar el server)
+ * [PRIVADO] Inicia el worker de Noticias (Llamar 1 sola vez al iniciar el server)
  */
-exports.startAIWorker = () => {
-    if (isAIWorkerRunning) {
-        console.log("[IA Worker] Ya está corriendo.");
+exports.startNewsWorker = () => {
+    if (isNewsWorkerRunning) {
+        console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[IA Worker] Iniciando worker de IA...");
-    isAIWorkerRunning = true;
-    _runAIWorker(); // Inicia el bucle sin 'await'
+    console.log("[News Worker] Iniciando worker UNIFICADO (IA -> Telegram -> Pausa)...");
+    isNewsWorkerRunning = true;
+    _runNewsWorker(); // Inicia el bucle sin 'await'
 };
 
 /**
- * [INTERNO] El bucle infinito que procesa artículos con IA, uno por uno.
+ * [INTERNO] El bucle infinito que procesa artículos con IA y los publica, uno por uno.
+ * (Esta es la lógica que me pediste, como la de las radios)
  */
-async function _runAIWorker() {
-    while (isAIWorkerRunning) { // Bucle infinito
+async function _runNewsWorker() {
+    while (isNewsWorkerRunning) { // Bucle infinito
         let articleToProcess = null;
         try {
             // 1. Buscar un artículo que no tenga IA
@@ -207,25 +206,36 @@ async function _runAIWorker() {
                 continue; // Vuelve al inicio del 'while'
             }
 
-            // 2. ¡Encontramos trabajo! Llamar a AWS Bedrock
-            console.log(`[IA Worker] Procesando: ${articleToProcess.titulo}`);
+            // 2. ¡Encontramos trabajo! Llamar a AWS Bedrock (IA)
+            console.log(`[News Worker] Paso 1/3: Procesando IA para: ${articleToProcess.titulo}`);
             const resultadoIA = await generateArticleContent(articleToProcess);
 
-            // 3. Guardar el resultado
+            // 3. Guardar el resultado (o marcar como fallido)
             if (resultadoIA) {
                 articleToProcess.articuloGenerado = resultadoIA.articuloGenerado;
                 articleToProcess.categoria = resultadoIA.categoriaSugerida;
+                
+                // 4. ¡ÉXITO! Publicar en Telegram INMEDIATAMENTE
+                console.log(`[News Worker] Paso 2/3: Publicando en Telegram: ${articleToProcess.titulo}`);
+                // Esta función (publicarUnArticulo) se encarga de ENVIAR y MARCAR 'telegramPosted: true'
+                await publicarUnArticulo(articleToProcess); 
+                
             } else {
                 // Si la IA falla, lo marcamos para no reintentar
-                articleToProcess.articuloGenerado = "FAILED_IA"; 
+                articleToProcess.articuloGenerado = "FAILED_IA";
+                // No se publica en Telegram porque falló la IA
             }
+            
+            // 5. Guardar los cambios en la DB (IA + estado de Telegram)
             await articleToProcess.save();
             
-            // 4. Pausa de 60 segundos (1 minuto por artículo)
-            await sleep(60 * 1000); 
+            // 6. Pausa de 30 segundos
+            // (Esto da 2 artículos por minuto, o 2880 al día. Más rápido que tus 2000)
+            console.log("[News Worker] Paso 3/3: Pausa de 30 segundos...");
+            await sleep(30 * 1000); 
 
         } catch (error) {
-            console.error(`[IA Worker] Error fatal procesando ${articleToProcess?.titulo}: ${error.message}`);
+            console.error(`[News Worker] Error fatal procesando ${articleToProcess?.titulo}: ${error.message}`);
             // Si la DB falla, esperamos 5 mins antes de reintentar
             await sleep(5 * 60 * 1000);
         }
@@ -234,61 +244,7 @@ async function _runAIWorker() {
 
 
 // =============================================
-// PARTE 3: EL WORKER DE TELEGRAM (Se ejecuta 1 vez y corre para siempre)
-// =============================================
-
-/**
- * [PRIVADO] Inicia el worker de Telegram (Llamar 1 sola vez al iniciar el server)
- */
-exports.startTelegramWorker = () => {
-    if (isTelegramWorkerRunning) {
-        console.log("[Telegram Worker] Ya está corriendo.");
-        return;
-    }
-    console.log("[Telegram Worker] Iniciando worker de Telegram...");
-    isTelegramWorkerRunning = true;
-    _runTelegramWorker(); // Inicia el bucle sin 'await'
-};
-
-/**
- * [INTERNO] El bucle infinito que publica en Telegram, uno por uno.
- */
-async function _runTelegramWorker() {
-    while (isTelegramWorkerRunning) {
-        let articleToPost = null;
-        try {
-            // 1. Buscar un artículo LISTO para postear
-            articleToPost = await Article.findOne({
-                articuloGenerado: { $ne: null, $ne: "FAILED_IA" }, // IA ya terminó
-                telegramPosted: false, // Aún no se posteó
-                sitio: 'noticias.lat'
-            }).sort({ fecha: 1 }); // Postear el más antiguo primero
-
-            if (!articleToPost) {
-                // No hay trabajo, esperamos 1 minuto
-                await sleep(60 * 1000);
-                continue;
-            }
-
-            // 2. ¡Encontramos trabajo! Llamar al bot
-            console.log(`[Telegram Worker] Publicando: ${articleToPost.titulo}`);
-            
-            await publicarUnArticulo(articleToPost); 
-            
-            // 3. Pausa de 90 segundos entre posts
-            await sleep(90 * 1000); 
-
-        } catch (error) {
-            console.error(`[Telegram Worker] Error fatal: ${error.message}`);
-            // Si hay un error, esperamos 1 min
-            await sleep(60 * 1000);
-        }
-    }
-}
-
-
-// =============================================
-// PARTE 4: RUTAS MANUALES Y SITEMAP (Actualizadas)
+// PARTE 3: RUTAS MANUALES Y SITEMAP (Actualizadas)
 // =============================================
 
 /**
@@ -321,7 +277,7 @@ exports.createManualArticle = async (req, res) => {
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida,
-            telegramPosted: false // El worker de Telegram lo encontrará
+            telegramPosted: false // ¡El worker lo encontrará y publicará!
         });
 
         await newArticle.save();

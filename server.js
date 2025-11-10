@@ -6,7 +6,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
-const cron = require('node-cron'); // ¡¡NUEVO!! Importamos el paquete cron
+const cron = require('node-cron'); // ¡Importamos el paquete cron!
 
 // Importamos el "enrutador" principal
 const apiRoutes = require('./routes/index');
@@ -27,7 +27,7 @@ const whiteList = [
     'http://127.0.0.1:5501',
     'http://localhost:3000',
     'http://192.168.0.4:3000',
-    'https://www.noticias.lat',
+    'httpsa://www.noticias.lat',
     'https://noticias.lat',
     'https://www.turadio.lat' ,
     'https://turadio.lat', 
@@ -60,20 +60,20 @@ mongoose.connect(process.env.MONGODB_URI)
       
       // --- ¡AQUÍ ENCENDEMOS LOS ROBOTS AUTOMÁTICOS! ---
       
-      // 1. Inicia el robot de IA (Bucle infinito, uno por uno)
-      syncController.startAIWorker();
+      // 1. Inicia el robot UNIFICADO de Noticias (IA -> Telegram -> Pausa)
+      syncController.startNewsWorker();
       
-      // 2. Inicia el robot de Telegram (Bucle infinito, uno por uno)
-      syncController.startTelegramWorker();
-
-      // 3. ¡¡NUEVO!! Inicia el CRON JOB de 3 horas
+      // 2. Inicia el CRON JOB de 3 horas para el RECOLECTOR
       console.log("Iniciando Cron Job de Recolección (cada 3 horas)...");
-      cron.schedule('0 */3 * * *', () => {
+      cron.schedule('0 */3 * * *', () => { // "Cada 3 horas"
           console.log('[Cron Job Interno] ¡Disparado! Ejecutando recolección de noticias...');
           // Llamamos a la función exportada
           syncController.runNewsAPIFetch();
       });
-      // ----------------------------------------
+
+      // 3. (Opcional) Ejecutar la recolección 1 vez al iniciar
+      console.log("[Inicio] Ejecutando recolección de noticias UNA VEZ al arrancar...");
+      syncController.runNewsAPIFetch();
       
   })
   .catch(err => console.error('❌ Error de conexión a MongoDB:', err));
@@ -86,7 +86,7 @@ app.use('/api', apiRoutes);
 // Ruta de bienvenida básica
 app.get('/', (req, res) => {
     res.json({
-        message: "Bienvenido a la API Central de LFAF Tech (v3.0 Escalable - WORKERS ACTIVOS)",
+        message: "Bienvenido a la API Central de LFAF Tech (v3.0 Escalable - WORKER UNIFICADO ACTIVO)",
         status: "ok"
     });
 });
