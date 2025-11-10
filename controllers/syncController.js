@@ -1,14 +1,12 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN WORKER (CON FILA DE MEMORIA) con AWS BEDROCK! ---
+// --- ¡VERSIÓN WORKER (CON ROTACIÓN DE CLAVES Y FILA DE MEMORIA)! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
 const { publicarUnArticulo } = require('../utils/telegramBot');
-const { generateArticleContent } = require('../utils/bedrockClient'); // ¡Usamos AWS!
+const { generateArticleContent } = require('../utils/bedrockClient');
 
-// --- Constantes (Tus APIs de noticias) ---
-const API_KEY_GNEWS = process.env.GNEWS_API_KEY;
-const API_KEY_NEWSDATA = process.env.NEWSDATA_API_KEY;
+// --- Constantes (Listas de países) ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
 const paisNewsDataMap = {
     "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
@@ -29,12 +27,26 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- Banderas de estado y FILA DE MEMORIA ---
 let isNewsWorkerRunning = false;
 let isFetchWorkerRunning = false;
-
-// ¡AQUÍ ESTÁ LA MAGIA!
-// Esta es la fila de espera en memoria.
 let globalArticleQueue = [];
 let articlesProcessedSinceLastTelegram = 0;
 
+// --- ¡NUEVO! SISTEMA DE ROTACIÓN DE CLAVES ---
+const gnewsKeys = [
+    process.env.GNEWS_API_KEY,
+    process.env.GNEWS_API_KEY_2,
+    process.env.GNEWS_API_KEY_3,
+    process.env.GNEWS_API_KEY_4
+].filter(Boolean); // Filtra las claves vacías
+
+const newsDataKeys = [
+    process.env.NEWSDATA_API_KEY,
+    process.env.NEWSDATA_API_KEY_2,
+    process.env.NEWSDATA_API_KEY_3,
+    process.env.NEWSDATA_API_KEY_4
+].filter(Boolean); // Filtra las claves vacías
+
+let currentGNewsKeyIndex = 0;
+let currentNewsDataKeyIndex = 0;
 
 // =============================================
 // PARTE 1: EL RECOLECTOR (Llamado por Cron Job o API)
@@ -45,77 +57,123 @@ let articlesProcessedSinceLastTelegram = 0;
  * Solo busca noticias y las GUARDA EN LA FILA DE MEMORIA (globalArticleQueue).
  */
 const runNewsAPIFetch = async () => {
-    // 1. Evitar ejecuciones duplicadas
     if (isFetchWorkerRunning) {
         console.warn("[RECOLECTOR] Intento de iniciar, pero ya estaba corriendo. Saltando.");
         return;
     }
-    isFetchWorkerRunning = true; // Bloquea el worker
+    isFetchWorkerRunning = true;
+
+    // Reiniciamos los índices de las claves al inicio de cada recolección
+    currentGNewsKeyIndex = 0;
+    currentNewsDataKeyIndex = 0;
 
     try {
-        if (!API_KEY_GNEWS || !API_KEY_NEWSDATA) {
-            console.error("(Recolector) Error: Faltan GNEWS_API_KEY o NEWSDATA_API_KEY.");
+        if (gnewsKeys.length === 0 || newsDataKeys.length === 0) {
+            console.error("(Recolector) Error: No se encontraron claves de API para GNews o NewsData en el .env.");
             return;
         }
-        console.log(`(Recolector) Iniciando recolección... Buscando artículos nuevos...`);
+        console.log(`(Recolector) Iniciando recolección... (GNews Keys: ${gnewsKeys.length}, NewsData Keys: ${newsDataKeys.length})`);
 
         let erroresFetch = [];
         let articulosCrudos = []; 
         
-        // --- PASO 1: NEWSDATA.IO ---
+        // --- PASO 1: NEWSDATA.IO (Con rotación de claves) ---
         for (const pais of PAISES_NEWSDATA) {
-             try {
-                const urlNewsData = `https://newsdata.io/api/1/news?apikey=${API_KEY_NEWSDATA}&country=${pais}&language=es,pt&size=${MAX_ARTICLES_PER_COUNTRY}`;
-                const response = await axios.get(urlNewsData);
-                if (response.data.results) {
-                    response.data.results.forEach(article => {
-                        if (!article.title || !article.link) return;
-                        const paisNombreCompleto = article.country[0];
-                        const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
-                        articulosCrudos.push({
-                            title: article.title,
-                            description: article.description || 'Sin descripción.',
-                            image: article.image_url,
-                            source: { name: article.source_id || 'Fuente Desconocida' },
-                            url: article.link,
-                            publishedAt: article.pubDate,
-                            paisLocal: paisCodigo
+            let success = false;
+            let attempts = 0;
+            
+            while (!success && attempts < newsDataKeys.length) {
+                try {
+                    const currentKey = newsDataKeys[currentNewsDataKeyIndex];
+                    const urlNewsData = `https://newsdata.io/api/1/news?apikey=${currentKey}&country=${pais}&language=es,pt&size=${MAX_ARTICLES_PER_COUNTRY}`;
+                    
+                    const response = await axios.get(urlNewsData);
+                    
+                    if (response.data.results) {
+                        response.data.results.forEach(article => {
+                            if (!article.title || !article.link) return;
+                            const paisNombreCompleto = article.country[0];
+                            const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
+                            articulosCrudos.push({
+                                title: article.title,
+                                description: article.description || 'Sin descripción.',
+                                image: article.image_url,
+                                source: { name: article.source_id || 'Fuente Desconocida' },
+                                url: article.link,
+                                publishedAt: article.pubDate,
+                                paisLocal: paisCodigo
+                            });
                         });
-                    });
+                    }
+                    success = true; // Si llegamos aquí, la petición fue exitosa
+
+                } catch (e) {
+                    const status = e.response?.status;
+                    if (status === 429 || status === 401 || status === 403) {
+                        // Error de clave (agotada, inválida, prohibida)
+                        console.warn(`(Recolector) NewsData Key #${currentNewsDataKeyIndex + 1} falló (Error ${status}) para [${pais}]. Rotando clave...`);
+                        currentNewsDataKeyIndex = (currentNewsDataKeyIndex + 1) % newsDataKeys.length; // Rota la clave
+                        attempts++;
+                        await sleep(2000); // Pequeña pausa antes de reintentar con la nueva clave
+                    } else {
+                        // Otro error (timeout, 500, etc.)
+                        console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
+                        erroresFetch.push(`NewsData-${pais}`);
+                        break; // Salir del 'while' y pasar al siguiente país
+                    }
                 }
-            } catch (e) {
-                console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
-                erroresFetch.push(`NewsData-${pais}`);
-            }
-            await sleep(1000); 
+            } // Fin del while
+            
+            // Pausa de 5 segundos entre países para no saturar la API
+            await sleep(2000); 
         }
         console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${articulosCrudos.length}.`);
 
-        // --- PASO 2: GNEWS ---
+        // --- PASO 2: GNEWS (Con rotación de claves) ---
         for (const pais of PAISES_GNEWS) {
-             try {
-                const urlGNews = `https://gnews.io/api/v4/top-headlines?country=${pais}&lang=es&max=${MAX_ARTICLES_PER_COUNTRY}&apikey=${API_KEY_GNEWS}`;
-                const response = await axios.get(urlGNews);
-                response.data.articles.forEach(article => {
-                    if (!article.title || !article.url) return;
-                    articulosCrudos.push({ ...article, paisLocal: pais });
-                });
-            } catch (e) {
-                console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
-                erroresFetch.push(`GNews-${pais}`);
-            }
-            await sleep(5000);
+            let success = false;
+            let attempts = 0;
+            
+            while (!success && attempts < gnewsKeys.length) {
+                try {
+                    const currentKey = gnewsKeys[currentGNewsKeyIndex];
+                    const urlGNews = `https://gnews.io/api/v4/top-headlines?country=${pais}&lang=es&max=${MAX_ARTICLES_PER_COUNTRY}&apikey=${currentKey}`;
+                    
+                    const response = await axios.get(urlGNews);
+                    
+                    response.data.articles.forEach(article => {
+                        if (!article.title || !article.url) return;
+                        articulosCrudos.push({ ...article, paisLocal: pais });
+                    });
+                    success = true; // Petición exitosa
+
+                } catch (e) {
+                    const status = e.response?.status;
+                    if (status === 429 || status === 403 || status === 401) {
+                        // Error de clave (agotada, prohibida, inválida)
+                        console.warn(`(Recolector) GNews Key #${currentGNewsKeyIndex + 1} falló (Error ${status}) para [${pais}]. Rotando clave...`);
+                        currentGNewsKeyIndex = (currentGNewsKeyIndex + 1) % gnewsKeys.length; // Rota la clave
+                        attempts++;
+                        await sleep(2000); // Pausa antes de reintentar
+                    } else {
+                        // Otro error
+                        console.error(`(Recolector) Error GNews [${pais}]: ${e.message}`);
+                        erroresFetch.push(`GNews-${pais}`);
+                        break; // Salir del 'while' y pasar al siguiente país
+                    }
+                }
+            } // Fin del while
+            
+            await sleep(1000); // Pausa de 1 segundo entre países (GNews es más permisivo)
         }
-        console.log(`(Recolector) -> Total Obtenidos GNews (sumados): ${articulosCrudos.length}.`);
+        console.log(`(Recolector) -> Total Obtenidos (GNews + NewsData): ${articulosCrudos.length}.`);
 
         // --- PASO 3: DE-DUPLICACIÓN (Contra DB y contra la FILA actual) ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
         
-        // URLs que ya están en la base de datos
         const articulosExistentesDB = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
         const urlsExistentesDB = new Set(articulosExistentesDB.map(a => a.enlaceOriginal));
         
-        // URLs que ya están en la fila de espera
         const urlsEnFila = new Set(globalArticleQueue.map(a => a.url));
 
         const articulosNuevos = articulosCrudos.filter(article => {
@@ -129,7 +187,6 @@ const runNewsAPIFetch = async () => {
 
         // --- PASO 4: AÑADIR A LA FILA DE MEMORIA ---
         if (articulosNuevos.length > 0) {
-            // ¡No usamos bulkWrite! Los añadimos a la fila
             globalArticleQueue.push(...articulosNuevos);
             console.log(`(Recolector) ¡${articulosNuevos.length} artículos nuevos añadidos a la fila! Total en fila: ${globalArticleQueue.length}`);
         }
@@ -147,24 +204,23 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 
 
 /**
- * [PRIVADO] Esta es la ruta API que puedes llamar manualmente si quieres.
+ * [PRIVADO] Esta es la ruta API que puedes llamar manually
  */
 exports.syncNewsAPIs = async (req, res) => {
-    // 1. Responder al usuario INMEDIATAMENTE
     res.json({ 
-        message: "¡Trabajo de RECOLECCIÓN iniciado! Añadiendo noticias a la fila de procesamiento en segundo plano."
+        message: "¡Trabajo de RECOLECCIÓN (con rotación de claves) iniciado! Añadiendo noticias a la fila en segundo plano."
     });
-    // 2. Llama a la función real SIN 'await'
     runNewsAPIFetch();
 };
 
 
 // =============================================
 // PARTE 2: EL WORKER DE NOTICIAS UNIFICADO (IA + TELEGRAM)
+// (Esta parte no necesita cambios)
 // =============================================
 
 /**
- * [PRIVADO] Inicia el worker de Noticias (Llamar 1 sola vez al iniciar el server)
+ * [PRIVADO] Inicia el worker de Noticias
  */
 exports.startNewsWorker = () => {
     if (isNewsWorkerRunning) {
@@ -173,27 +229,25 @@ exports.startNewsWorker = () => {
     }
     console.log("[News Worker] Iniciando worker (IA -> DB -> Telegram c/11)...");
     isNewsWorkerRunning = true;
-    _runNewsWorker(); // Inicia el bucle sin 'await'
+    _runNewsWorker(); 
 };
 
 /**
- * [INTERNO] El bucle infinito que procesa artículos de la FILA DE MEMORIA,
- * los guarda en la DB y los publica en Telegram.
+ * [INTERNO] El bucle infinito que procesa artículos de la FILA DE MEMORIA
  */
 async function _runNewsWorker() {
-    while (isNewsWorkerRunning) { // Bucle infinito
+    while (isNewsWorkerRunning) {
         let articleToProcess = null;
         try {
             // 1. Buscar un artículo en la FILA DE MEMORIA
             if (globalArticleQueue.length === 0) {
-                // No hay trabajo, esperamos 1 minuto
-                // console.log("[News Worker] Fila vacía. Durmiendo 1 minuto...");
+                // Fila vacía, esperamos 1 minuto
                 await sleep(1 * 60 * 1000); 
-                continue; // Vuelve al inicio del 'while'
+                continue; 
             }
 
             // 2. ¡Encontramos trabajo! Tomar el próximo artículo
-            articleToProcess = globalArticleQueue.shift(); // Saca el primero de la fila
+            articleToProcess = globalArticleQueue.shift(); 
             
             console.log(`[News Worker] Fila restante: ${globalArticleQueue.length}. Procesando IA para: ${articleToProcess.title}`);
 
@@ -209,16 +263,15 @@ async function _runNewsWorker() {
                     descripcion: articleToProcess.description,
                     imagen: articleToProcess.image,
                     sitio: 'noticias.lat',
-                    categoria: resultadoIA.categoriaSugerida, // De la IA
+                    categoria: resultadoIA.categoriaSugerida,
                     pais: articleToProcess.paisLocal,
                     fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt),
-                    articuloGenerado: resultadoIA.articuloGenerado, // De la IA
-                    telegramPosted: false // Aún no
+                    articuloGenerado: resultadoIA.articuloGenerado,
+                    telegramPosted: false
                 });
                 
-                // ¡AQUÍ ES DONDE SE GUARDA EN LA DB POR PRIMERA VEZ!
                 await newArticle.save();
                 console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
 
@@ -227,7 +280,6 @@ async function _runNewsWorker() {
                 
                 if (articlesProcessedSinceLastTelegram >= 11) {
                     console.log(`[News Worker] ¡Artículo #${articlesProcessedSinceLastTelegram}! Enviando a Telegram...`);
-                    // Esta función (publicarUnArticulo) se encarga de ENVIAR y MARCAR 'telegramPosted: true'
                     await publicarUnArticulo(newArticle); 
                     articlesProcessedSinceLastTelegram = 0; // Reiniciar contador
                 } else {
@@ -235,12 +287,11 @@ async function _runNewsWorker() {
                 }
                 
             } else {
-                // Si la IA falla, simplemente lo descartamos y no lo guardamos en la DB.
+                // Si la IA falla, lo descartamos
                 console.warn(`[News Worker] Fallo de IA para ${articleToProcess.title}. Artículo descartado, no se guardará en DB.`);
             }
             
             // 7. Pausa de 30 segundos
-            // (Esto da 2 artículos por minuto, o 2880 al día. Más rápido que tus 2000)
             console.log("[News Worker] Pausa de 30 segundos...");
             await sleep(30 * 1000); 
 
@@ -250,7 +301,7 @@ async function _runNewsWorker() {
             } else {
                 console.error(`[News Worker] Error fatal procesando ${articleToProcess?.title}: ${error.message}`);
             }
-            // Si hay un error, esperamos 1 min antes de reintentar con el siguiente
+            // Esperamos 1 min antes de reintentar con el siguiente
             await sleep(1 * 60 * 1000);
         }
     }
@@ -258,7 +309,8 @@ async function _runNewsWorker() {
 
 
 // =============================================
-// PARTE 3: RUTAS MANUALES Y SITEMAP (Actualizadas)
+// PARTE 3: RUTAS MANUALES Y SITEMAP
+// (Sin cambios)
 // =============================================
 
 /**
@@ -272,14 +324,12 @@ exports.createManualArticle = async (req, res) => {
              return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio para que la IA trabaje." });
         }
         
-        // 1. Llamar a la IA (Bedrock)
         const resultadoIA = await generateArticleContent({ enlaceOriginal, titulo });
 
         if (!resultadoIA) {
             return res.status(500).json({ error: "La IA (Bedrock) no pudo procesar la URL proporcionada." });
         }
 
-        // 2. Guardar en la DB
         const newArticle = new Article({
             titulo: titulo || 'Título no proporcionado (IA)',
             descripcion: descripcion || 'Descripción no proporcionada (IA)',
@@ -291,13 +341,11 @@ exports.createManualArticle = async (req, res) => {
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida,
-            telegramPosted: false // Marcado como NO posteado
+            telegramPosted: false 
         });
 
         await newArticle.save();
         
-        // 3. ¡Publicar en Telegram INMEDIATAMENTE!
-        // (Los artículos manuales no siguen la regla de 1/11, se publican siempre)
         try {
             await publicarUnArticulo(newArticle);
             console.log("Artículo manual publicado en Telegram.");
@@ -318,7 +366,6 @@ exports.createManualArticle = async (req, res) => {
 
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Sin cambios)
  */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat'; 
