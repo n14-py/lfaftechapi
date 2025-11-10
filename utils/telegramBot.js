@@ -3,6 +3,15 @@
 const axios = require('axios');
 const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID } = process.env;
 
+
+// --- AÑADE ESTAS LÍNEAS AQUÍ ---
+console.log("==================================================");
+console.log("[DEBUG] Verificando variables de Telegram...");
+console.log("[DEBUG] TELEGRAM_CHANNEL_ID (leído por la app):", TELEGRAM_CHANNEL_ID || "¡¡NO DEFINIDO!!");
+console.log("[DEBUG] TELEGRAM_BOT_TOKEN (primeros 10 chars):", TELEGRAM_BOT_TOKEN ? TELEGRAM_BOT_TOKEN.substring(0, 10) + "..." : "¡¡NO DEFINIDO!!");
+console.log("==================================================");
+// --- FIN DE LÍNEAS DE DEBUG ---
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function sendTelegramMessage(article) {
