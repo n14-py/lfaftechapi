@@ -216,7 +216,7 @@ exports.syncNewsAPIs = async (req, res) => {
 async function _pingGoogleSitemap() {
     // Esta es la URL de tu sitemap en el frontend de Vercel
     const sitemapUrl = 'https://www.noticias.lat/sitemap.xml';
-const pingUrl = `https://www.google.com/webmasters/sitemaps/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;    
+const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
     try {
         await axios.get(pingUrl);
         console.log(`[News Worker] ¡Sitemap "ping" enviado a Google con éxito!`);
