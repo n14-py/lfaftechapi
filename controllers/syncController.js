@@ -131,7 +131,9 @@ const runNewsAPIFetch = async () => {
                         pais: article.paisLocal,
                         fuente: article.source.name,
                         enlaceOriginal: article.url,
-                        fecha: new Date(article.publishedAt)
+                        fecha: new Date(article.publishedAt),
+                        articuloGenerado: null,     // Se guarda como NULL
+                        telegramPosted: false       // Se guarda como FALSE
                     }
                 },
                 upsert: true 
@@ -194,9 +196,10 @@ async function _runNewsWorker() {
     while (isNewsWorkerRunning) { // Bucle infinito
         let articleToProcess = null;
         try {
-            // 1. Buscar un artículo que no tenga IA
+            // 1. Buscar un artículo que no tenga IA Y no se haya posteado
             articleToProcess = await Article.findOne({
                 articuloGenerado: null, // El campo de IA está vacío
+                telegramPosted: false,  // Y no se ha posteado
                 sitio: 'noticias.lat'
             });
 
@@ -224,6 +227,9 @@ async function _runNewsWorker() {
                 // Si la IA falla, lo marcamos para no reintentar
                 articleToProcess.articuloGenerado = "FAILED_IA";
                 // No se publica en Telegram porque falló la IA
+                // PERO SÍ lo marcamos como 'telegramPosted: true' para que el bot no lo vuelva a intentar
+                articleToProcess.telegramPosted = true; 
+                console.warn(`[News Worker] Fallo de IA para ${articleToProcess.titulo}. Marcado como FAILED_IA y no se posteará.`);
             }
             
             // 5. Guardar los cambios en la DB (IA + estado de Telegram)

@@ -27,7 +27,7 @@ const whiteList = [
     'http://127.0.0.1:5501',
     'http://localhost:3000',
     'http://192.168.0.4:3000',
-    'httpsa://www.noticias.lat',
+    'https://www.noticias.lat',
     'https://noticias.lat',
     'https://www.turadio.lat' ,
     'https://turadio.lat', 
