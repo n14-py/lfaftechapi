@@ -14,6 +14,9 @@ const apiRoutes = require('./routes/index');
 // --- Importamos los controladores de workers ---
 const syncController = require('./controllers/syncController');
 
+// --- ¡NUEVO! Importamos el Scraper de Ezoic ---
+const { runEzoicScraperTask } = require('./utils/ezoicScraper');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -33,7 +36,10 @@ const whiteList = [
     'https://turadio.lat', 
     'https://www.tusinitusineli.com',
     'https://tusinitusineli.vercel.app/',
-    'https://tusinitusineli.com'
+    'https://tusinitusineli.com',
+    // --- ¡AÑADE TUS URLS DE PRUEBA! ---
+    'https://lfaftechapi-prueba.onrender.com',
+    'https://noticiaslat-prueba.onrender.com' 
 ];
 
 const corsOptions = {
@@ -74,6 +80,17 @@ mongoose.connect(process.env.MONGODB_URI)
       // 3. (Opcional) Ejecutar la recolección 1 vez al iniciar
       console.log("[Inicio] Ejecutando recolección de noticias UNA VEZ al arrancar...");
       syncController.runNewsAPIFetch();
+
+      // 4. --- ¡NUEVO ROBOT! ---
+      // Inicia el CRON JOB del Scraper de Ezoic (cada 15 minutos)
+      console.log("Iniciando Cron Job del Scraper de Ezoic (cada 15 minutos)...");
+      cron.schedule('*/15 * * * *', () => { // "Cada 15 minutos"
+          console.log('[Cron Job Ezoic] ¡Disparado! Buscando videos importados por Ezoic...');
+          runEzoicScraperTask();
+      });
+      // 5. (Opcional) Ejecutar el Scraper de Ezoic 1 vez al iniciar
+      console.log("[Inicio] Ejecutando Scraper de Ezoic UNA VEZ al arrancar...");
+      runEzoicScraperTask();
       
   })
   .catch(err => console.error('❌ Error de conexión a MongoDB:', err));

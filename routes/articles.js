@@ -56,6 +56,13 @@ const requireAdminKey = (req, res, next) => {
 // (Esta ruta ya la tenías correcta)
 router.get('/sitemap.xml', articleController.getSitemap);
 
+// --- ¡NUEVA RUTA PÚBLICA AÑADIDA! ---
+// Esta es la URL que le darás a Ezoic para importar videos
+// GET /api/mrss.xml
+router.get('/mrss.xml', articleController.getMRSSFeed);
+// --- FIN DE LA NUEVA RUTA ---
+
+
 // GET /api/articles/recommended
 // ¡¡SOLUCIÓN!! Quitamos el 'cacheMiddleware' de esta ruta.
 router.get('/articles/recommended', articleController.getRecommendedArticles);
@@ -71,10 +78,10 @@ router.get('/article/:id', articleController.getArticleById);
 // 4. RUTAS PRIVADAS
 // =============================================
 
-// --- ¡NUEVA RUTA PRIVADA AÑADIDA! ---
+// --- RUTA PRIVADA MODIFICADA ---
 // Esta la llamará tu WORKER (tts-fmpeg) cuando termine un video
 router.post('/article/video-complete', requireAdminKey, articleController.handleVideoComplete);
-// --- FIN DE LA NUEVA RUTA ---
+// --- FIN DE LA RUTA MODIFICADA ---
 
 
 // Esta es la ruta que llamará tu Cron Interno

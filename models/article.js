@@ -21,14 +21,22 @@ const ArticleSchema = new mongoose.Schema({
     // Este campo nos dirá si el bot de Telegram ya lo publicó.
     telegramPosted: { type: Boolean, default: false, index: true },
 
-    // --- ¡CAMPOS NUEVOS PARA EL VIDEO! ---
-    videoUrl: { type: String }, // Aquí irá la URL de Ezoic
+    // --- ¡CAMPOS DE VIDEO MODIFICADOS PARA EL FLUJO DE EZOIC! ---
+    
+    // Aquí guardaremos la URL del .mp4 crudo que subimos a Cloudinary
+    cloudinary_url: { type: String }, 
+    
+    // Aquí guardaremos la URL/embed final del reproductor de Ezoic (la que monetiza)
+    ezoicVideoUrl: { type: String },  
+    
     videoProcessingStatus: { 
         type: String, 
-        enum: ['pending', 'processing', 'complete', 'failed'], 
-        default: 'pending' // Estado por defecto
+        // Añadimos el nuevo estado 'pending_ezoic_import'
+        enum: ['pending', 'processing', 'pending_ezoic_import', 'complete', 'failed'], 
+        default: 'pending', // Estado por defecto
+        index: true // Importante para que el nuevo robot-scraper busque rápido
     },
-    // --- FIN DE CAMPOS NUEVOS ---
+    // --- FIN DE CAMPOS MODIFICADOS ---
 
     fuente: String,
     enlaceOriginal: { type: String, unique: true }, // 'unique:true' evita duplicados
