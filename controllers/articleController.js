@@ -21,7 +21,7 @@ const paisTermMap = {
  */
 exports.getArticles = async (req, res) => {
     try {
-        const { sitio, categoria, limite, pagina } = req.query;
+        const { sitio, categoria, limite, pagina, videoStatus } = req.query; // ¡'videoStatus' AÑADIDO!
         
         // Obtenemos los filtros de búsqueda
         let queryTexto = req.query.query || null;
@@ -39,51 +39,60 @@ exports.getArticles = async (req, res) => {
         let sort = { fecha: -1 }; 
         let projection = {};      
 
-        // --- ¡¡AQUÍ COMIENZA LA NUEVA LÓGICA DE BÚSQUEDA!! ---
+        // --- ¡¡LÓGICA DE BÚSQUEDA!! ---
         
         // 1. ANÁLISIS DE PAÍS:
-        // Si el usuario *no* filtró por un país (ej: no está en la página de Honduras)...
-        // ...vamos a "robar" la palabra del país de su búsqueda.
         if (queryTexto && !paisFiltro) {
             const queryPalabras = queryTexto.toLowerCase().split(' ');
             let paisEncontrado = null;
             
-            // Revisa cada palabra de la búsqueda
             for (const palabra of queryPalabras) {
                 if (paisTermMap[palabra]) {
-                    paisEncontrado = paisTermMap[palabra]; // ej: "py"
+                    paisEncontrado = paisTermMap[palabra];
                     break;
                 }
             }
             
-            // Si encontramos un país en la búsqueda (ej: "accidentes paraguay")
             if (paisEncontrado) {
-                paisFiltro = paisEncontrado; // Aplicamos el filtro de país
-                
-                // Limpiamos la query (quitamos "paraguay" de la búsqueda)
+                paisFiltro = paisEncontrado; 
                 queryTexto = queryPalabras.filter(p => !paisTermMap[p]).join(' ');
             }
         }
         
         // 2. CONSTRUCCIÓN DEL FILTRO DE MONGO:
         
-        // A. Añadir filtro de PAÍS si existe (sea explícito o "robado")
+        // A. Añadir filtro de PAÍS
         if (paisFiltro) {
             filtro.pais = paisFiltro;
         }
 
-        // B. Añadir filtro de TEXTO si existe
+        // B. Añadir filtro de TEXTO
         if (queryTexto && queryTexto.trim() !== '') {
             filtro.$text = { $search: queryTexto };
             sort = { score: { $meta: "textScore" } }; 
             projection = { score: { $meta: "textScore" } }; 
         }
         
-        // C. Añadir filtro de CATEGORÍA (solo si no hay búsqueda de texto Y no hay filtro de país)
+        // C. Añadir filtro de CATEGORÍA
         if (!queryTexto && !paisFiltro && categoria && categoria !== 'todos') {
             filtro.categoria = categoria;
         }
-        // --- FIN DE LA LÓGICA DE BÚSQUEDA ---
+
+        // --- ¡¡NUEVA LÓGICA DE VIDEO!! ---
+        // D. Añadir filtro de ESTADO DE VIDEO (para staging)
+        if (videoStatus === 'complete_or_pending') {
+            // Devuelve artículos que SÍ tienen video O artículos de solo texto (pending)
+            filtro.$or = [
+                { videoProcessingStatus: 'complete' },
+                { videoProcessingStatus: 'pending' }
+            ];
+        } else if (videoStatus === 'complete') {
+            // Devuelve SÓLO artículos con video (para el feed)
+            filtro.videoProcessingStatus = 'complete';
+        }
+        // Si 'videoStatus' no se envía, no se filtra por estado (comportamiento normal)
+        // --- FIN DE LÓGICA DE VIDEO ---
+
 
         const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
@@ -138,6 +147,13 @@ exports.getRecommendedArticles = async (req, res) => {
             categoria: categoria,
             _id: { $ne: excludeId } 
         };
+        
+        // ¡CAMBIO! AÑADIMOS FILTRO DE VIDEO AQUÍ TAMBIÉN
+        // Para que solo recomiende artículos con video o de texto
+        filtro.$or = [
+            { videoProcessingStatus: 'complete' },
+            { videoProcessingStatus: 'pending' }
+        ];
 
         const randomSkip = Math.floor(Math.random() * 20);
         
@@ -155,28 +171,23 @@ exports.getRecommendedArticles = async (req, res) => {
 };
 
 
-// --- ¡¡AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA!! ---
-
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Añadido al final de articleController.js)
+ * (Sin cambios)
  */
 exports.getSitemap = async (req, res) => {
-    // ¡IMPORTANTE! Cambia esto por la URL real de tu sitio web
-    const BASE_URL = 'https://noticias.lat'; // URL del Frontend
+    const BASE_URL = 'https://noticias.lat'; 
 
     try {
-        // 1. Obtenemos todos los artículos de la DB
-        const articles = await Article.find({ sitio: 'noticias.lat' }) // Filtra por sitio
+        const articles = await Article.find({ sitio: 'noticias.lat' }) 
             .sort({ fecha: -1 })
             .select('_id fecha');
         
         let xml = '<?xml version="1.0" encoding="UTF-8"?>';
         xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
 
-        // 2. Añadir Páginas Estáticas (Homepage, Contacto, etc.)
         const staticPages = [
-    { loc: '', priority: '1.00', changefreq: 'daily' }, // Homepage
+    { loc: '', priority: '1.00', changefreq: 'daily' }, 
     { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
     { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
     { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
@@ -191,11 +202,9 @@ exports.getSitemap = async (req, res) => {
             xml += '</url>';
         });
 
-        // 3. Añadir todos los Artículos (Dinámicos)
         articles.forEach(article => {
             const articleDate = new Date(article.fecha).toISOString().split('T')[0];
             xml += '<url>';
-            // URL del artículo en el frontend
             xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`;
             xml += `<lastmod>${articleDate}</lastmod>`;
             xml += '<changefreq>weekly</changefreq>';
@@ -204,13 +213,61 @@ exports.getSitemap = async (req, res) => {
         });
 
         xml += '</urlset>';
-
-        // 4. Enviar el XML
         res.header('Content-Type', 'application/xml');
         res.send(xml);
 
     } catch (error) {
         console.error("Error en getSitemap:", error);
         res.status(500).json({ error: "Error interno del servidor." });
+    }
+};
+
+
+// --- ¡NUEVA FUNCIÓN AÑADIDA AL FINAL! ---
+
+/**
+ * [PRIVADO] Lo llama el Worker de Medios (tts-fmpeg) cuando un video está listo.
+ */
+exports.handleVideoComplete = async (req, res) => {
+    const { articleId, videoUrl, error } = req.body;
+
+    if (!articleId) {
+        return res.status(400).json({ error: "Falta articleId" });
+    }
+
+    try {
+        let updateData = {};
+        if (error) {
+            // Si el worker reporta un error
+            console.error(`[API] El Worker reportó un fallo para ${articleId}: ${error}`);
+            updateData = { videoProcessingStatus: 'failed' };
+        } else if (videoUrl) {
+            // Si el worker reporta éxito
+            console.log(`[API] Video completado para ${articleId}. URL: ${videoUrl}`);
+            updateData = { 
+                videoProcessingStatus: 'complete',
+                videoUrl: videoUrl
+            };
+        } else {
+            return res.status(400).json({ error: "Falta videoUrl o error en la petición" });
+        }
+
+        // Actualiza el artículo en la Base de Datos
+        const updatedArticle = await Article.findByIdAndUpdate(
+            articleId,
+            { $set: updateData },
+            { new: true } // Devuelve el documento actualizado
+        );
+
+        if (!updatedArticle) {
+            return res.status(404).json({ error: "Artículo no encontrado para actualizar." });
+        }
+
+        // Responde al worker que todo salió bien
+        res.json({ success: true, articleId: updatedArticle._id, status: updatedArticle.videoProcessingStatus });
+
+    } catch (dbError) {
+        console.error("Error en handleVideoComplete (DB):", dbError);
+        res.status(500).json({ error: "Error interno del servidor al actualizar." });
     }
 };

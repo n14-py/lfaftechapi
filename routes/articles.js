@@ -71,6 +71,12 @@ router.get('/article/:id', articleController.getArticleById);
 // 4. RUTAS PRIVADAS
 // =============================================
 
+// --- ¡NUEVA RUTA PRIVADA AÑADIDA! ---
+// Esta la llamará tu WORKER (tts-fmpeg) cuando termine un video
+router.post('/article/video-complete', requireAdminKey, articleController.handleVideoComplete);
+// --- FIN DE LA NUEVA RUTA ---
+
+
 // Esta es la ruta que llamará tu Cron Interno
 // POST /api/sync-news
 router.post('/sync-news', requireAdminKey, syncController.syncNewsAPIs);
