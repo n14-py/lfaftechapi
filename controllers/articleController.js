@@ -7,7 +7,7 @@ const Article = require('../models/article');
 const axios = require('axios'); // Para llamar al bot
 
 // URL de nuestro bot de Python (sigue en el puerto 5001)
-const BOT_API_URL = 'https://tts-fmpeg-lfaf.onrender.com';
+const BOT_API_URL = 'https://tts-fmpeg-lfaf.onrender.com/generate_video';
 
 // --- ¡NUEVO! LISTA DE REPORTEROS ---
 // Aquí pones los nombres EXACTOS de los archivos de imagen

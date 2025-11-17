@@ -1,95 +1,42 @@
 const express = require('express');
 const router = express.Router();
 const articleController = require('../controllers/articleController');
-const syncController = require('../controllers/syncController');
-const mongoose = require('mongoose'); // Necesario para el middleware
 
-// =============================================
-// 1. LÓGICA DE CACHÉ EN MEMORIA (In-Memory Cache)
-// =============================================
-const cache = {};
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos en milisegundos
+/*
+ * ==========================================================
+ * --- RUTAS DE ARTÍCULOS (Corregidas para el bot de YouTube) ---
+ * ==========================================================
+ */
 
-const cacheMiddleware = (req, res, next) => {
-    // Generamos una clave única basada en la URL completa (incluyendo query params)
-    const key = req.originalUrl;
+// --- RUTA PRINCIPAL ---
+// GET /api/articles -> Obtiene la lista de artículos (con filtros)
+router.get('/', articleController.getArticles);
 
-    if (cache[key] && (Date.now() - cache[key].timestamp < CACHE_DURATION)) {
-        // [CACHE HIT] La data está fresca, la servimos inmediatamente.
-        // console.log(`[CACHE HIT] Sirviendo ${key} desde caché.`); // ¡LOG ELIMINADO!
-        return res.json(cache[key].data);
-    }
-    
-    // [CACHE MISS] Si falla la caché, sobrescribimos res.json para almacenar la respuesta.
-    res.sendResponse = res.json;
-    res.json = (body) => {
-        cache[key] = {
-            timestamp: Date.now(),
-            data: body
-        };
-        // console.log(`[CACHE MISS] Almacenando ${key} en caché.`); // ¡LOG ELIMINADO!
-        // Llamamos al método original para enviar la respuesta al cliente
-        res.sendResponse(body);
-    };
-
-    next();
-};
+// POST /api/articles -> Crea un nuevo artículo Y llama al bot
+router.post('/', articleController.createArticle);
 
 
-// =============================================
-// 2. MIDDLEWARE DE AUTENTICACIÓN (Rutas privadas)
-// =============================================
-// Esta función revisará que solo tú puedas AÑADIR contenido
-const requireAdminKey = (req, res, next) => {
-    const apiKey = req.headers['x-api-key'];
-    if (apiKey && apiKey === process.env.ADMIN_API_KEY) {
-        next(); // Clave correcta, puede continuar
-    } else {
-        res.status(403).json({ error: "Acceso no autorizado." });
-    }
-};
+// --- RUTAS DE ARTÍCULO INDIVIDUAL ---
+// GET /api/articles/:id -> Obtiene un artículo por su ID
+router.get('/:id', articleController.getArticleById);
 
-// =============================================
-// 3. RUTAS PÚBLICAS
-// =============================================
 
-// (Esta ruta ya la tenías correcta)
+// --- RUTAS ESPECIALES ---
+// GET /api/articles/sitemap.xml -> Genera el sitemap
 router.get('/sitemap.xml', articleController.getSitemap);
 
-// --- ¡NUEVA RUTA PÚBLICA AÑADIDA! ---
-// Esta es la URL que le darás a Ezoic para importar videos
-// GET /api/mrss.xml
-router.get('/mrss.xml', articleController.getMRSSFeed);
-// --- FIN DE LA NUEVA RUTA ---
+// GET /api/articles/recommended -> Obtiene 4 artículos recomendados
+// ¡Importante! Esta debe ir ANTES de /:id para que funcione
+router.get('/recommended', articleController.getRecommendedArticles);
 
 
-// GET /api/articles/recommended
-// ¡¡SOLUCIÓN!! Quitamos el 'cacheMiddleware' de esta ruta.
-router.get('/articles/recommended', articleController.getRecommendedArticles);
+/*
+ * --- RUTAS ELIMINADAS ---
+ *
+ * La ruta para /mrss.xml (getMRSSFeed) se eliminó.
+ * La ruta para /video_complete (handleVideoComplete) se eliminó.
+ *
+ * Si alguna de estas rutas estaba en la línea 62, ese era el error.
+ */
 
-// GET /api/articles?sitio=...&categoria=...
-// APLICAMOS EL MIDDLEWARE DE CACHÉ (aquí SÍ es útil)
-router.get('/articles', cacheMiddleware, articleController.getArticles);
-
-// GET /api/article/:id
-router.get('/article/:id', articleController.getArticleById);
-
-// =============================================
-// 4. RUTAS PRIVADAS
-// =============================================
-
-// --- RUTA PRIVADA MODIFICADA ---
-// Esta la llamará tu WORKER (tts-fmpeg) cuando termine un video
-router.post('/article/video-complete', requireAdminKey, articleController.handleVideoComplete);
-// --- FIN DE LA RUTA MODIFICADA ---
-
-
-// Esta es la ruta que llamará tu Cron Interno
-// POST /api/sync-news
-router.post('/sync-news', requireAdminKey, syncController.syncNewsAPIs);
-
-// POST /api/articles (para crear manual)
-router.post('/articles', requireAdminKey, syncController.createManualArticle);
-
-// Exportamos el router para que server.js pueda usarlo
 module.exports = router;
