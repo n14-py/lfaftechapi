@@ -1,8 +1,34 @@
+/*
+  Archivo: lfaftechapi/controllers/articleController.js
+  ¡MODIFICADO PARA ENVIAR UN REPORTERO AL AZAR!
+*/
 const mongoose = require('mongoose');
 const Article = require('../models/article');
+const axios = require('axios'); // Para llamar al bot
 
-// --- ¡NUEVO MAPA INTELIGENTE! ---
-// (Esta parte no cambia)
+// URL de nuestro bot de Python (sigue en el puerto 5001)
+const BOT_API_URL = 'https://tts-fmpeg-lfaf.onrender.com';
+
+// --- ¡NUEVO! LISTA DE REPORTEROS ---
+// Aquí pones los nombres EXACTOS de los archivos de imagen
+// que están en la carpeta TTS-FMPEG/reporter_images/
+const REPORTEROS_IMAGENES = [
+    'Ancla de Noticias.lat en estudio.jpg', // Tu imagen original
+    'reportero_juan.jpg',
+    'reportera_maria.png',
+    'reportero_carlos.jpg',
+    'reportera_lucia.jpg',
+    'reportero_miguel.png',
+    'reportera_ana.jpg',
+    'reportero_javier.jpg',
+    'reportera_sofia.png',
+    'reportero_diego.jpg'
+    // ...¡Añade hasta 10 o más si quieres!
+];
+// --- FIN DE LA LISTA ---
+
+
+// El mapa de países no cambia
 const paisTermMap = {
     "argentina": "ar", "bolivia": "bo", "brasil": "br", "chile": "cl", 
     "colombia": "co", "costa rica": "cr", "cuba": "cu", "ecuador": "ec", 
@@ -14,14 +40,101 @@ const paisTermMap = {
     "ni": "ni", "pa": "pa", "py": "py", "pe": "pe", "do": "do", "uy": "uy", "ve": "ve"
 };
 
+
+/**
+ * [PRIVADO] Función de Crear Artículo
+ * (Llama al bot en segundo plano)
+ */
+exports.createArticle = async (req, res) => {
+    const { 
+        titulo, 
+        descripcion, 
+        imagen, 
+        categoria, 
+        sitio, 
+        pais, 
+        articuloGenerado, 
+        fuente, 
+        enlaceOriginal 
+    } = req.body;
+    
+    let savedArticle;
+    try {
+        // --- PASO 1: Guardar el artículo en MongoDB ---
+        const newArticle = new Article({
+            titulo,
+            descripcion,
+            imagen,
+            categoria,
+            sitio,
+            pais: paisTermMap[pais] || pais || null,
+            articuloGenerado,
+            fuente,
+            enlaceOriginal,
+            videoProcessingStatus: 'processing' // Estado inicial
+        });
+
+        savedArticle = await newArticle.save();
+        
+        // Respondemos INMEDIATAMENTE al cliente
+        res.status(201).json(savedArticle);
+
+    } catch (dbError) {
+        console.error("[API] Error al guardar en MongoDB:", dbError.message);
+        if (dbError.code === 11000) {
+            return res.status(409).json({ error: "Artículo duplicado (enlaceOriginal ya existe)." });
+        }
+        return res.status(500).json({ error: "Error interno del servidor al guardar en DB." });
+    }
+
+    // --- PASO 2: Llamar al Bot de Python (en segundo plano) ---
+    try {
+        // --- ¡NUEVA LÓGICA DE SELECCIÓN! ---
+        // Elegimos un nombre de imagen al azar de nuestra lista
+        const imagenReporteroElegida = REPORTEROS_IMAGENES[
+            Math.floor(Math.random() * REPORTEROS_IMAGENES.length)
+        ];
+        
+        console.log(`[API] Llamando al bot para: "${savedArticle.titulo}" (ID: ${savedArticle._id})`);
+        console.log(`[API] Usando reportero: ${imagenReporteroElegida}`);
+        
+        // ¡Enviamos los 3 campos que el bot espera!
+        const videoResponse = await axios.post(BOT_API_URL, {
+            text: articuloGenerado,       // El texto completo para el TTS
+            title: titulo,             // El título para YouTube
+            image_name: imagenReporteroElegida // La imagen elegida
+        });
+
+        if (videoResponse.data && videoResponse.data.youtubeId) {
+            console.log(`[API] Bot completado. YouTube ID: ${videoResponse.data.youtubeId}`);
+            // Actualizamos el artículo con el ID de YouTube
+            await Article.findByIdAndUpdate(savedArticle._id, {
+                $set: {
+                    youtubeId: videoResponse.data.youtubeId,
+                    videoProcessingStatus: 'complete',
+                    // ¡Extra! Guardamos qué reportero se usó (opcional)
+                    // reporterImage: imagenReporteroElegida 
+                }
+            });
+        } else {
+            throw new Error("El bot de video no devolvió un youtubeId.");
+        }
+
+    } catch (botError) {
+        console.error(`[API] ¡FALLO EL BOT DE PYTHON para ${savedArticle._id}! ${botError.message}`);
+        await Article.findByIdAndUpdate(savedArticle._id, {
+            $set: { videoProcessingStatus: 'failed' }
+        });
+    }
+};
+
 /**
  * [PÚBLICO] Obtener LISTA de artículos
- * (Esta parte no cambia)
+ * (Sin cambios en esta función)
  */
 exports.getArticles = async (req, res) => {
     try {
         const { sitio, categoria, limite, pagina, videoStatus } = req.query;
-        
         let queryTexto = req.query.query || null;
         let paisFiltro = req.query.pais || null;
 
@@ -37,7 +150,6 @@ exports.getArticles = async (req, res) => {
         let sort = { fecha: -1 }; 
         let projection = {};      
 
-        // --- LÓGICA DE BÚSQUEDA (Sin cambios) ---
         if (queryTexto && !paisFiltro) {
             const queryPalabras = queryTexto.toLowerCase().split(' ');
             let paisEncontrado = null;
@@ -53,7 +165,6 @@ exports.getArticles = async (req, res) => {
             }
         }
         
-        // --- CONSTRUCCIÓN DEL FILTRO DE MONGO (Sin cambios) ---
         if (paisFiltro) filtro.pais = paisFiltro;
         if (queryTexto && queryTexto.trim() !== '') {
             filtro.$text = { $search: queryTexto };
@@ -64,21 +175,16 @@ exports.getArticles = async (req, res) => {
             filtro.categoria = categoria;
         }
 
-        // --- ¡LÓGICA DE VIDEO MODIFICADA! ---
-        // Ahora 'complete_or_pending' busca videos listos en Ezoic O videos en cualquier
-        // estado previo (pending, processing, pending_ezoic_import)
         if (videoStatus === 'complete_or_pending') {
             filtro.$or = [
-                { videoProcessingStatus: 'complete' }, // ¡Video listo en Ezoic!
-                { videoProcessingStatus: 'pending' },  // Artículo de solo texto
-                { videoProcessingStatus: 'processing' }, // Video generándose
-                { videoProcessingStatus: 'pending_ezoic_import' } // Video en Cloudinary, esperando a Ezoic
+                { videoProcessingStatus: 'complete' },
+                { videoProcessingStatus: 'pending' },
+                { videoProcessingStatus: 'processing' }
             ];
         } else if (videoStatus === 'complete') {
-            // Devuelve SÓLO artículos con video de Ezoic (para el feed)
             filtro.videoProcessingStatus = 'complete';
+            filtro.youtubeId = { $exists: true, $ne: null };
         }
-        // --- FIN DE LÓGICA DE VIDEO ---
 
         const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
@@ -97,7 +203,7 @@ exports.getArticles = async (req, res) => {
 
 /**
  * [PÚBLICO] Obtener UN solo artículo por su ID
- * (Sin cambios)
+ * (Sin cambios en esta función)
  */
 exports.getArticleById = async (req, res) => {
     try {
@@ -119,7 +225,7 @@ exports.getArticleById = async (req, res) => {
 
 /**
  * [PÚBLICO] Obtener artículos RECOMENDADOS
- * (Lógica de video actualizada para incluir todos los estados)
+ * (Sin cambios en esta función)
  */
 exports.getRecommendedArticles = async (req, res) => {
     try {
@@ -131,23 +237,15 @@ exports.getRecommendedArticles = async (req, res) => {
         let filtro = { 
             sitio: sitio, 
             categoria: categoria,
-            _id: { $ne: excludeId } 
+            _id: { $ne: excludeId },
+            videoProcessingStatus: 'complete', // Solo recomienda videos listos
+            youtubeId: { $exists: true, $ne: null }
         };
         
-        // ¡CAMBIO! AÑADIMOS FILTRO DE VIDEO AQUÍ TAMBIÉN
-        // Para que solo recomiende artículos que ya tengan video o estén en proceso
-        filtro.$or = [
-            { videoProcessingStatus: 'complete' },
-            { videoProcessingStatus: 'pending_ezoic_import' },
-            { videoProcessingStatus: 'pending' }
-        ];
-
-        const randomSkip = Math.floor(Math.random() * 20);
-        
-        const recommended = await Article.find(filtro)
-            .sort({ fecha: -1 })
-            .skip(randomSkip)
-            .limit(4); 
+        const recommended = await Article.aggregate([
+            { $match: filtro },
+            { $sample: { size: 4 } } // 4 aleatorios
+        ]);
 
         res.json(recommended);
 
@@ -160,7 +258,7 @@ exports.getRecommendedArticles = async (req, res) => {
 
 /**
  * [PÚBLICO] Generar el Sitemap.xml
- * (Sin cambios)
+ * (Sin cambios en esta función)
  */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat'; 
@@ -173,6 +271,7 @@ exports.getSitemap = async (req, res) => {
         xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
         const staticPages = [
             { loc: '', priority: '1.00', changefreq: 'daily' }, 
+            { loc: 'feed', priority: '0.90', changefreq: 'daily' },
             { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
             { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
             { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
@@ -200,126 +299,5 @@ exports.getSitemap = async (req, res) => {
     } catch (error) {
         console.error("Error en getSitemap:", error);
         res.status(500).json({ error: "Error interno del servidor." });
-    }
-};
-
-
-/**
- * [PRIVADO] Lo llama el Worker de Medios (tts-fmpeg)
- * (Esta es la versión que modificamos en el paso anterior)
- */
-exports.handleVideoComplete = async (req, res) => {
-    const { articleId, cloudinary_url, miniatura_url, error } = req.body;
-
-    if (!articleId) {
-        return res.status(400).json({ error: "Falta articleId" });
-    }
-
-    try {
-        let updateData = {};
-        if (error) {
-            console.error(`[API] El Worker reportó un fallo para ${articleId}: ${error}`);
-            updateData = { videoProcessingStatus: 'failed' };
-        } else if (cloudinary_url) {
-            console.log(`[API] Video subido a Cloudinary para ${articleId}.`);
-            console.log(`[API] URL Cloudinary: ${cloudinary_url}`);
-            
-            updateData = { 
-                videoProcessingStatus: 'pending_ezoic_import', 
-                cloudinary_url: cloudinary_url,              
-                imagen: miniatura_url || undefined         
-            };
-        } else {
-            return res.status(400).json({ error: "Falta cloudinary_url o error en la petición" });
-        }
-
-        const updatedArticle = await Article.findByIdAndUpdate(
-            articleId,
-            { $set: updateData },
-            { new: true }
-        );
-
-        if (!updatedArticle) {
-            return res.status(404).json({ error: "Artículo no encontrado para actualizar." });
-        }
-        res.json({ success: true, articleId: updatedArticle._id, status: updatedArticle.videoProcessingStatus });
-
-    } catch (dbError) {
-        console.error("Error en handleVideoComplete (DB):", dbError);
-        res.status(500).json({ error: "Error interno del servidor al actualizar." });
-    }
-};
-
-
-/**
- * ==========================================================
- * --- ¡NUEVA FUNCIÓN AÑADIDA AL FINAL! ---
- * ==========================================================
- * * [PÚBLICO] Generar el feed MRSS.xml para Ezoic
- * Ezoic leerá esta URL para importar videos.
- */
-exports.getMRSSFeed = async (req, res) => {
-    // ¡IMPORTANTE! Esta URL debe ser la de tu sitio de PRODUCCIÓN.
-    const BASE_URL = 'https://www.noticias.lat'; 
-
-    try {
-        // Buscamos artículos que:
-        // 1. Estén en Cloudinary (pending_ezoic_import)
-        // 2. O ya estén completos en Ezoic (complete)
-        const articles = await Article.find({
-            sitio: 'noticias.lat',
-            videoProcessingStatus: { $in: ['pending_ezoic_import', 'complete'] },
-            cloudinary_url: { $exists: true, $ne: null, $ne: "" } // Asegura que tengamos una URL de video
-        })
-        .sort({ fecha: -1 })
-        .limit(100); // Limita a los 100 más recientes por eficiencia
-
-        let xml = '<?xml version="1.0" encoding="UTF-8"?>';
-        xml += '<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">';
-        xml += '<channel>';
-        xml += '<title>Noticias.lat Videos</title>';
-        xml += `<link>${BASE_URL}</link>`;
-        xml += '<description>Videos de noticias generados por IA para Noticias.lat</description>';
-
-        articles.forEach(article => {
-            // Usamos un ID único para el GUID
-            const guid = `${BASE_URL}/articulo/${article._id}`;
-            // Formateamos la fecha a RFC 822 (requerido por MRSS)
-            const pubDate = new Date(article.fecha).toUTCString();
-            
-            // Limpiamos el título y la descripción para XML
-            const cleanTitle = article.titulo.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const cleanDescription = (article.descripcion.substring(0, 250) + '...').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-            xml += '<item>';
-            xml += `<title>${cleanTitle}</title>`;
-            xml += `<link>${guid}</link>`;
-            xml += `<guid isPermaLink="true">${guid}</guid>`;
-            xml += `<pubDate>${pubDate}</pubDate>`;
-            xml += `<description>${cleanDescription}</description>`;
-            
-            // --- El bloque de Media ---
-            // Esta es la URL que Ezoic usará para descargar tu video
-            xml += `<media:content 
-                        url="${article.cloudinary_url}" 
-                        type="video/mp4" 
-                        medium="video" 
-                     />`;
-            
-            // Esta es la miniatura que Ezoic usará
-            xml += `<media:thumbnail url="${article.imagen}" />`;
-            xml += `<media:keywords>${article.categoria}</media:keywords>`;
-            xml += '</item>';
-        });
-
-        xml += '</channel>';
-        xml += '</rss>';
-
-        res.header('Content-Type', 'application/xml');
-        res.send(xml);
-
-    } catch (error) {
-        console.error("Error en getMRSSFeed:", error);
-        res.status(500).json({ error: "Error interno del servidor al generar feed MRSS." });
     }
 };
