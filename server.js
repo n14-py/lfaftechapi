@@ -15,7 +15,7 @@ const apiRoutes = require('./routes/index');
 const syncController = require('./controllers/syncController');
 
 // --- ¡NUEVO! Importamos el Scraper de Ezoic ---
-const { runEzoicScraperTask } = require('./utils/ezoicScraper');
+//const { runEzoicScraperTask } = require('./utils/ezoicScraper');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
