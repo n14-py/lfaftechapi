@@ -60,6 +60,25 @@ router.get('/sitemap.xml', articleController.getSitemap);
 // ¡¡SOLUCIÓN!! Quitamos el 'cacheMiddleware' de esta ruta.
 router.get('/articles/recommended', articleController.getRecommendedArticles);
 
+// --- ¡NUEVA RUTA PÚBLICA PARA EL FEED! ---
+// Esta es la ruta que llamará la página /feed.js
+const cacheMiddlewareFeed = (req, res, next) => {
+    const key = req.originalUrl;
+    const CACHE_FEED = 60 * 1000; // 1 minuto
+    if (cache[key] && (Date.now() - cache[key].timestamp < CACHE_FEED)) {
+        return res.json(cache[key].data);
+    }
+    res.sendResponse = res.json;
+    res.json = (body) => {
+        cache[key] = { timestamp: Date.now(), data: body };
+        res.sendResponse(body);
+    };
+    next();
+};
+router.get('/articles/feed', cacheMiddlewareFeed, articleController.getFeedArticles);
+// --- FIN DE LA NUEVA RUTA ---
+
+
 // GET /api/articles?sitio=...&categoria=...
 // APLICAMOS EL MIDDLEWARE DE CACHÉ (aquí SÍ es útil)
 router.get('/articles', cacheMiddleware, articleController.getArticles);
@@ -77,6 +96,16 @@ router.post('/sync-news', requireAdminKey, syncController.syncNewsAPIs);
 
 // POST /api/articles (para crear manual)
 router.post('/articles', requireAdminKey, syncController.createManualArticle);
+
+
+// --- ¡NUEVAS RUTAS DE CALLBACK PARA EL BOT DE VIDEO! ---
+// El Bot (TTS-FMPEG) llama a esta ruta cuando el video está LISTO
+router.post('/articles/video_complete', requireAdminKey, articleController.videoCompleteCallback);
+
+// El Bot (TTS-FMPEG) llama a esta ruta si el video FALLA
+router.post('/articles/video_failed', requireAdminKey, articleController.videoFailedCallback);
+// --- FIN DE NUEVAS RUTAS ---
+
 
 // Exportamos el router para que server.js pueda usarlo
 module.exports = router;

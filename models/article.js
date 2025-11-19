@@ -21,6 +21,16 @@ const ArticleSchema = new mongoose.Schema({
     // Este campo nos dirá si el bot de Telegram ya lo publicó.
     telegramPosted: { type: Boolean, default: false, index: true },
 
+    // --- ¡NUEVO! CAMPOS PARA EL BOT DE YOUTUBE ---
+    videoProcessingStatus: { 
+        type: String, 
+        enum: ['pending', 'processing', 'complete', 'failed'], 
+        default: 'pending', 
+        index: true 
+    },
+    youtubeId: { type: String, sparse: true },
+    // --- FIN DE CAMPOS DE YOUTUBE ---
+
     fuente: String,
     enlaceOriginal: { type: String, unique: true }, // 'unique:true' evita duplicados
     fecha: { type: Date, default: Date.now }

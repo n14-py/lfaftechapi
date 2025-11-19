@@ -6,6 +6,20 @@ const Article = require('../models/article');
 const { publicarUnArticulo } = require('../utils/telegramBot');
 const { generateArticleContent } = require('../utils/bedrockClient');
 
+// --- ¡NUEVO! Configuración del Bot de Video ---
+const VIDEO_BOT_URL = process.env.VIDEO_BOT_URL;
+// Reusamos la misma ADMIN_API_KEY que ya tienes
+const VIDEO_BOT_KEY = process.env.ADMIN_API_KEY; 
+
+// Tu lista de reporteros (basado en tus archivos de imagen)
+const REPORTER_IMAGES = [
+    "reportera_maria.png",
+    "reportero_juan.png"
+    // TODO: Añade aquí los nombres de archivo de tus otros 8+ reporteros
+];
+// --- Fin Configuración Bot ---
+
+
 // --- Constantes (Listas de países) ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
 const paisNewsDataMap = {
@@ -205,6 +219,94 @@ exports.syncNewsAPIs = async (req, res) => {
     runNewsAPIFetch();
 };
 
+
+// --- ¡NUEVA FUNCIÓN! ---
+/**
+ * [INTERNO] Llama al bot de Python (TTS-FMPEG) para generar un video.
+ * Se ejecuta "fire-and-forget" (sin 'await' en el worker) para no bloquear el bucle.
+ */
+async function _triggerVideoBot(article) {
+    if (!VIDEO_BOT_URL) {
+        console.warn(`[VideoBot] No se configuró VIDEO_BOT_URL. Saltando generación de video para ${article.titulo}`);
+        return;
+    }
+    // Verificamos si el artículo AÚN existe antes de procesar
+    const articleCheck = await Article.findById(article._id);
+    if (!articleCheck) {
+         console.warn(`[VideoBot] El artículo ${article.titulo} fue eliminado. Cancelando video.`);
+         return;
+    }
+
+    console.log(`[VideoBot] Iniciando trabajo para: ${article.titulo}`);
+
+    try {
+        // 1. Marcar el artículo como "processing" (como describiste)
+        articleCheck.videoProcessingStatus = 'processing';
+        await articleCheck.save();
+
+        // 2. Elegir reportero al azar
+        const randomReporter = REPORTER_IMAGES[Math.floor(Math.random() * REPORTER_IMAGES.length)];
+        console.log(`[VideoBot] Reportero seleccionado: ${randomReporter}`);
+
+        // 3. Preparar datos para el bot (basado en tu TTS-FMPEG/app.py)
+        const payload = {
+            text: articleCheck.articuloGenerado, // El texto largo
+            title: articleCheck.titulo,            // El título
+            image_name: randomReporter        // ej: "reportera_maria.png"
+        };
+
+        // 4. Llamar al bot (Esta llamada puede tardar MINUTOS)
+        console.log(`[VideoBot] Llamando a ${VIDEO_BOT_URL}/generate_video...`);
+        const botResponse = await axios.post(
+            `${VIDEO_BOT_URL}/generate_video`,
+            payload,
+            { 
+                // Usamos la misma clave ADMIN_API_KEY para autenticar API -> BOT
+                headers: { 'x-api-key': VIDEO_BOT_KEY }, 
+                // Timeout largo (10 minutos) porque gTTS, FFmpeg y YouTube tardan
+                timeout: 10 * 60 * 1000 
+            }
+        );
+
+        const youtubeId = botResponse.data.youtubeId;
+
+        if (!youtubeId) {
+            throw new Error("El bot de video no devolvió un youtubeId.");
+        }
+
+        // 5. ¡Éxito! Actualizar la DB (como describiste)
+        console.log(`[VideoBot] ¡Éxito! ID de YouTube: ${youtubeId}. Guardando en DB.`);
+        
+        // Volvemos a buscar por si acaso fue borrado durante el largo proceso
+        const articleFinal = await Article.findById(article._id);
+        if (articleFinal) {
+            articleFinal.videoProcessingStatus = 'complete';
+            articleFinal.youtubeId = youtubeId;
+            await articleFinal.save();
+        } else {
+             console.warn(`[VideoBot] Video generado (${youtubeId}), pero el artículo ${article.titulo} ya no existe.`);
+        }
+
+
+    } catch (error) {
+        const errorMsg = error.response ? (error.response.data.error || error.message) : error.message;
+        console.error(`[VideoBot] Error fatal procesando ${article.titulo}: ${errorMsg}`);
+        
+        // Marcar como 'failed' para no reintentar
+        try {
+            // Re-buscamos el artículo por si la referencia 'article' es antigua
+            const articleInDB = await Article.findById(article._id);
+            if (articleInDB) {
+                articleInDB.videoProcessingStatus = 'failed';
+                await articleInDB.save();
+            }
+        } catch (dbError) {
+            console.error(`[VideoBot] Error marcando como fallido: ${dbError.message}`);
+        }
+    }
+}
+
+
 // =============================================
 // PARTE 2: EL WORKER DE NOTICIAS UNIFICADO
 // =============================================
@@ -216,7 +318,7 @@ exports.syncNewsAPIs = async (req, res) => {
 async function _pingGoogleSitemap() {
     // Esta es la URL de tu sitemap en el frontend de Vercel
     const sitemapUrl = 'https://www.noticias.lat/sitemap.xml';
-const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
+    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
     try {
         await axios.get(pingUrl);
         console.log(`[News Worker] ¡Sitemap "ping" enviado a Google con éxito!`);
@@ -234,7 +336,7 @@ exports.startNewsWorker = () => {
         console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[News Worker] Iniciando worker (IA -> DB -> Telegram c/11 -> Ping Google)...");
+    console.log("[News Worker] Iniciando worker (IA -> DB -> VideoBot -> Telegram c/11 -> Ping Google)...");
     isNewsWorkerRunning = true;
     _runNewsWorker(); 
 };
@@ -275,11 +377,17 @@ async function _runNewsWorker() {
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt),
                     articuloGenerado: resultadoIA.articuloGenerado,
-                    telegramPosted: false
+                    telegramPosted: false,
+                    videoProcessingStatus: 'pending' // Estado inicial
                 });
                 
                 await newArticle.save();
                 console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
+
+                // --- ¡¡AQUÍ ES!! LLAMAR AL BOT DE VIDEO (SIN AWAIT) ---
+                // Esto lo ejecuta en segundo plano y el bucle continúa
+                _triggerVideoBot(newArticle);
+                // --------------------------------------------------
 
                 // 6. LÓGICA DE TELEGRAM Y SITEMAP (CADA 11)
                 articlesProcessedSinceLastTelegram++;
@@ -333,7 +441,7 @@ exports.createManualArticle = async (req, res) => {
              return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio para que la IA trabaje." });
         }
         
-        const resultadoIA = await generateArticleContent({ enlaceOriginal, titulo });
+        const resultadoIA = await generateArticleContent({ url: enlaceOriginal, title: titulo });
 
         if (!resultadoIA) {
             return res.status(500).json({ error: "La IA (Bedrock) no pudo procesar la URL proporcionada." });
@@ -350,7 +458,8 @@ exports.createManualArticle = async (req, res) => {
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida,
-            telegramPosted: false 
+            telegramPosted: false,
+            videoProcessingStatus: 'pending' // Estado inicial
         });
 
         await newArticle.save();
@@ -358,9 +467,17 @@ exports.createManualArticle = async (req, res) => {
         // --- ¡ACTUALIZADO! ---
         // Los artículos manuales también avisan a Telegram Y a Google.
         try {
-            console.log("Artículo manual guardado. Enviando a Telegram y Google...");
+            console.log("Artículo manual guardado. Enviando a Telegram, Google y Bot de Video...");
+            
+            // 1. Llama al Bot de Video (sin await)
+             _triggerVideoBot(newArticle);
+
+            // 2. Llama a Telegram
             await publicarUnArticulo(newArticle);
+
+            // 3. Llama a Google
             await _pingGoogleSitemap(); // <-- ¡AQUÍ TAMBIÉN!
+
         } catch (telegramError) {
             console.error("Artículo manual guardado, pero falló al enviar notificaciones:", telegramError.message);
         }

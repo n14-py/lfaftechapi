@@ -85,6 +85,8 @@ exports.getArticles = async (req, res) => {
         }
         // --- FIN DE LA LÓGICA DE BÚSQUEDA ---
 
+        // ¡IMPORTANTE! Dejamos que .find() devuelva todos los campos
+        // (incluyendo 'youtubeId' y 'videoProcessingStatus')
         const articles = await Article.find(filtro, projection).sort(sort).skip(skip).limit(limiteNum);
         const total = await Article.countDocuments(filtro);
 
@@ -155,8 +157,6 @@ exports.getRecommendedArticles = async (req, res) => {
 };
 
 
-// --- ¡¡AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA!! ---
-
 /**
  * [PÚBLICO] Generar el Sitemap.xml
  * (Añadido al final de articleController.js)
@@ -211,6 +211,103 @@ exports.getSitemap = async (req, res) => {
 
     } catch (error) {
         console.error("Error en getSitemap:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+};
+
+
+/**
+ * [PÚBLICO] Obtener LISTA de artículos para el FEED
+ * Devuelve solo artículos que tienen un video completo.
+ */
+exports.getFeedArticles = async (req, res) => {
+    try {
+        const { sitio, limite } = req.query;
+        if (!sitio) {
+            return res.status(400).json({ error: "El parámetro 'sitio' es obligatorio." });
+        }
+        
+        const limiteNum = parseInt(limite) || 50; // Traer 50 videos para el feed
+
+        let filtro = { 
+            sitio: sitio,
+            videoProcessingStatus: 'complete', // ¡Solo los que están completos!
+            youtubeId: { $ne: null }           // ¡Y que tienen un ID!
+        };
+        
+        const articles = await Article.find(filtro)
+            .sort({ fecha: -1 }) // Los videos más nuevos primero
+            .limit(limiteNum)
+            .select('titulo categoria youtubeId'); // Solo traemos los datos necesarios
+
+        res.json(articles);
+
+    } catch (error) {
+        console.error("Error en getFeedArticles:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+};
+
+
+// --- ¡NUEVA FUNCIÓN DE CALLBACK (ÉXITO)! ---
+/**
+ * [PRIVADO] El Bot de Python llama a esta ruta cuando el video está LISTO.
+ */
+exports.videoCompleteCallback = async (req, res) => {
+    try {
+        const { articleId, youtubeId } = req.body;
+        
+        if (!articleId || !youtubeId) {
+            return res.status(400).json({ error: "Faltan articleId o youtubeId" });
+        }
+
+        const article = await Article.findById(articleId);
+        if (!article) {
+            console.warn(`[Callback] Se completó el video para ${articleId}, pero el artículo ya no existe.`);
+            return res.status(404).json({ error: "Artículo no encontrado" });
+        }
+
+        // ¡Guardamos el ID de YouTube!
+        article.videoProcessingStatus = 'complete';
+        article.youtubeId = youtubeId;
+        await article.save();
+        
+        console.log(`[Callback] ¡Éxito! Video guardado para ${article.titulo} (ID: ${youtubeId})`);
+        res.json({ success: true, message: `Artículo ${articleId} actualizado.` });
+
+    } catch (error) {
+        console.error("Error en videoCompleteCallback:", error);
+        res.status(500).json({ error: "Error interno del servidor." });
+    }
+};
+
+// --- ¡NUEVA FUNCIÓN DE CALLBACK (FALLO)! ---
+/**
+ * [PRIVADO] El Bot de Python llama a esta ruta si el video FALLA.
+ */
+exports.videoFailedCallback = async (req, res) => {
+    try {
+        const { articleId, error } = req.body;
+        
+        if (!articleId) {
+            return res.status(400).json({ error: "Falta articleId" });
+        }
+
+        const article = await Article.findById(articleId);
+        if (!article) {
+             console.warn(`[Callback] Falló el video para ${articleId}, pero el artículo ya no existe.`);
+            return res.status(404).json({ error: "Artículo no encontrado" });
+        }
+
+        // Marcamos como fallido para no reintentar
+        article.videoProcessingStatus = 'failed';
+        await article.save();
+        
+        console.error(`[Callback] ¡FALLO! Bot reportó error para ${article.titulo}: ${error || 'Error desconocido'}`);
+        res.json({ success: true, message: `Artículo ${articleId} marcado como fallido.` });
+
+    } catch (error) {
+        console.error("Error en videoFailedCallback:", error);
         res.status(500).json({ error: "Error interno del servidor." });
     }
 };
