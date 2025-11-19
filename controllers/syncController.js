@@ -249,11 +249,13 @@ async function _triggerVideoBot(article) {
         console.log(`[VideoBot] Reportero seleccionado: ${randomReporter}`);
 
         // 3. Preparar datos para el bot (basado en tu TTS-FMPEG/app.py)
+        // --- CAMBIO: Enviamos la URL de la imagen real ---
         const payload = {
             text: articleCheck.articuloGenerado, 
             title: articleCheck.titulo,            
-            image_name: randomReporter,
-            article_id: articleCheck._id // <--- ¡FALTABA ESTO!
+            // EN LUGAR DE 'image_name', AHORA ENVIAMOS 'image_url'
+            image_url: articleCheck.imagen, // <--- ¡La foto de la noticia!
+            article_id: articleCheck._id 
         };
 
         // 4. Llamar al bot (Esta llamada puede tardar MINUTOS)
