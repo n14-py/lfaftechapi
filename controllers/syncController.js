@@ -250,9 +250,10 @@ async function _triggerVideoBot(article) {
 
         // 3. Preparar datos para el bot (basado en tu TTS-FMPEG/app.py)
         const payload = {
-            text: articleCheck.articuloGenerado, // El texto largo
-            title: articleCheck.titulo,            // El título
-            image_name: randomReporter        // ej: "reportera_maria.png"
+            text: articleCheck.articuloGenerado, 
+            title: articleCheck.titulo,            
+            image_name: randomReporter,
+            article_id: articleCheck._id // <--- ¡FALTABA ESTO!
         };
 
         // 4. Llamar al bot (Esta llamada puede tardar MINUTOS)
