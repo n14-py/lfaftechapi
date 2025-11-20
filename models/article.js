@@ -16,12 +16,12 @@ const ArticleSchema = new mongoose.Schema({
     pais: { type: String, index: true, sparse: true },
     
     // El artículo largo generado por la IA
-    articuloGenerado: { type: String, required: true }, // <- ¡Ahora es 'required'!
+    articuloGenerado: { type: String, required: true }, 
 
     // Este campo nos dirá si el bot de Telegram ya lo publicó.
     telegramPosted: { type: Boolean, default: false, index: true },
 
-    // --- ¡NUEVO! CAMPOS PARA EL BOT DE YOUTUBE ---
+    // --- CAMPOS PARA EL BOT DE YOUTUBE ---
     videoProcessingStatus: { 
         type: String, 
         enum: ['pending', 'processing', 'complete', 'failed'], 
@@ -36,20 +36,29 @@ const ArticleSchema = new mongoose.Schema({
     fecha: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// --- ¡ÍNDICE DE BÚSQUEDA! ---
-// (Este es el importante para el buscador público)
+
+// =========================================================
+// 🚀 OPTIMIZACIÓN DE ÍNDICES (Estrategia "Máximo Espacio")
+// =========================================================
+
+// 1. ÍNDICE DE BÚSQUEDA LIGERO (Vital para ahorrar espacio)
+// Al NO indexar 'articuloGenerado', ahorras cientos de MBs.
+// El buscador encontrará noticias por título y descripción.
 ArticleSchema.index({ 
     titulo: 'text', 
-    descripcion: 'text', 
-    articuloGenerado: 'text' 
+    descripcion: 'text' 
 });
 
-// --- ¡ÍNDICES DE ROBOT ELIMINADOS! ---
-// Ya no necesitamos los índices para 'articuloGenerado: 1'
-// porque el nuevo worker usa una fila en memoria y no consulta la DB
-// para encontrar trabajo.
-// ------------------------------------
+// 2. ÍNDICES COMPUESTOS (Para velocidad en la Home y Filtros)
+ArticleSchema.index({ sitio: 1, fecha: -1 });
+ArticleSchema.index({ pais: 1, fecha: -1 });
+ArticleSchema.index({ categoria: 1, fecha: -1 });
+
+// 3. LIMPIEZA AUTOMÁTICA (DESACTIVADA)
+// Hemos quitado el índice TTL. Las noticias se guardarán PARA SIEMPRE
+// o hasta que se llene el plan gratuito.
+// ArticleSchema.index({ fecha: 1 }, { expireAfterSeconds: 7776000 }); <--- ELIMINADO
 
 
-// Exportamos el modelo para que el resto de la app pueda usarlo
+// Exportamos el modelo
 module.exports = mongoose.model('Article', ArticleSchema);
