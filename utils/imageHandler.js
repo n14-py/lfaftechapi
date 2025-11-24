@@ -12,44 +12,34 @@ const BUNNY_CDN_URL = process.env.BUNNY_CDN_URL;
 const IMG_WIDTH = 1280;
 const IMG_HEIGHT = 720;
 
-// --- PALETA DE COLORES "CLICKBAIT" ---
-const TEXT_COLORS = [
-    '#FFD700', // Amarillo Oro (Clásico)
-    '#FFFFFF', // Blanco Puro (Limpio)
-    '#FF0033', // Rojo YouTube (Alerta)
-    '#00FF00'  // Verde Neón (Dinero/Matrix)
-];
-
 /**
- * Función para limpiar texto de emojis o caracteres raros que rompen SVG
+ * Limpieza de texto
  */
 function cleanText(text) {
-    return text.replace(/[^\w\s\u00C0-\u00FF,.?!]/g, "").trim();
+    return text.replace(/[^\w\s\u00C0-\u00FF,.?!¡¿]/g, "").trim();
 }
 
 /**
- * Función inteligente para dividir texto y calcular tamaño
+ * Divide el texto en líneas para que quepa arriba
  */
 function processTextLayout(text) {
     const clean = cleanText(text.toUpperCase());
     const length = clean.length;
     
+    // Configuramos letras GRANDES y "GORDITAS"
     let fontSize;
     let maxCharsPerLine;
 
-    // Lógica de Auto-Ajuste
-    if (length < 30) {
-        fontSize = 110; // Texto Gigante
-        maxCharsPerLine = 15;
-    } else if (length < 60) {
-        fontSize = 90; // Texto Grande
-        maxCharsPerLine = 20;
-    } else if (length < 100) {
-        fontSize = 70; // Texto Mediano
-        maxCharsPerLine = 25;
+    // Ajuste dinámico para que siempre se vea grande
+    if (length < 25) {
+        fontSize = 130; // ¡Masivo!
+        maxCharsPerLine = 12;
+    } else if (length < 50) {
+        fontSize = 100; // Muy grande
+        maxCharsPerLine = 16;
     } else {
-        fontSize = 55; // Texto Pequeño (para títulos muy largos)
-        maxCharsPerLine = 35;
+        fontSize = 80; // Grande
+        maxCharsPerLine = 22;
     }
 
     const words = clean.split(' ');
@@ -66,10 +56,10 @@ function processTextLayout(text) {
     }
     lines.push(currentLine);
 
-    // Si salieron demasiadas líneas, cortamos y ponemos "..."
-    if (lines.length > 4) {
-        lines = lines.slice(0, 4);
-        lines[3] += "...";
+    // Limitamos a 3 líneas máximo para no tapar la imagen
+    if (lines.length > 3) {
+        lines = lines.slice(0, 3);
+        lines[2] += "...";
     }
 
     return { lines, fontSize };
@@ -85,9 +75,9 @@ exports.generateNewsThumbnail = async (prompt, newsTitle) => {
             return null;
         }
 
-        console.log(`[ImageHandler] Generando imagen para: "${newsTitle.substring(0, 20)}..."`);
+        console.log(`[ImageHandler] Generando miniatura ÉPICA para: "${newsTitle.substring(0, 20)}..."`);
 
-        // 1. DEEPINFRA (SDXL Turbo)
+        // 1. OBTENER IMAGEN IA (DeepInfra - SDXL Turbo)
         const deepInfraRes = await axios.post(
             'https://api.deepinfra.com/v1/inference/stabilityai/sdxl-turbo',
             {
@@ -108,64 +98,77 @@ exports.generateNewsThumbnail = async (prompt, newsTitle) => {
         if (!deepInfraRes.data?.images?.[0]) throw new Error("Fallo en DeepInfra");
         const imageBuffer = Buffer.from(deepInfraRes.data.images[0].split(',')[1], 'base64');
 
-        // 2. DISEÑO DINÁMICO
+        // 2. PREPARAR EL DISEÑO
         const { lines, fontSize } = processTextLayout(newsTitle);
+        const lineHeight = fontSize * 1.05;
         
-        // Elegir color al azar
-        const randomColor = TEXT_COLORS[Math.floor(Math.random() * TEXT_COLORS.length)];
-        
-        // Calcular posición vertical centrada
-        const lineHeight = fontSize * 1.1;
-        const totalTextHeight = lines.length * lineHeight;
-        const startY = (IMG_HEIGHT - totalTextHeight) / 2 + (fontSize * 0.8); // Ajuste visual
+        // Calculamos posición: Texto ARRIBA con un pequeño margen
+        const startY = 80 + (fontSize / 2); 
 
-        const svgLines = lines.map((line, i) => 
-            `<tspan x="50%" y="${startY + (i * lineHeight)}">${line}</tspan>`
-        ).join('');
+        // Generamos las líneas de texto SVG
+        // Alternamos colores: Primera línea AMARILLO (Impacto), siguientes BLANCO (Claridad)
+        const svgLines = lines.map((line, i) => {
+            const color = (i === 0) ? '#FFD700' : '#FFFFFF'; // Oro y Blanco
+            return `<tspan x="50%" y="${startY + (i * lineHeight)}" fill="${color}">${line}</tspan>`;
+        }).join('');
 
-        const svgImage = `
+        // 3. CAPA DE TEXTO CON SOMBRAS Y BORDES (SVG AVANZADO)
+        const svgTextOverlay = `
         <svg width="${IMG_WIDTH}" height="${IMG_HEIGHT}">
+            <defs>
+                <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation="4"/> <feOffset dx="6" dy="6" result="offsetblur"/> <feComponentTransfer>
+                        <feFuncA type="linear" slope="0.8"/> </feComponentTransfer>
+                    <feMerge> 
+                        <feMergeNode/>
+                        <feMergeNode in="SourceGraphic"/> 
+                    </feMerge>
+                </filter>
+            </defs>
             <style>
                 .title { 
-                    fill: ${randomColor}; 
                     stroke: black; 
-                    stroke-width: ${fontSize * 0.15}px; 
+                    stroke-width: ${fontSize * 0.08}px; /* Borde negro grueso */
+                    stroke-linejoin: round;
                     paint-order: stroke fill;
                     font-size: ${fontSize}px; 
-                    font-weight: 900; 
-                    font-family: Arial, Impact, sans-serif; 
+                    font-weight: 900; /* Lo más gordo posible */
+                    font-family: "Arial Black", "Verdana", sans-serif; 
                     text-anchor: middle; 
                 }
             </style>
-            <filter id="dropShadow">
-                <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
-                <feOffset dx="4" dy="4" result="offsetblur"/>
-                <feComponentTransfer>
-                    <feFuncA type="linear" slope="0.7"/>
-                </feComponentTransfer>
-                <feMerge> 
-                    <feMergeNode/>
-                    <feMergeNode in="SourceGraphic"/> 
-                </feMerge>
-            </filter>
-            <text x="50%" y="50%" class="title" filter="url(#dropShadow)">${svgLines}</text>
+            <text x="50%" class="title" filter="url(#shadow)">${svgLines}</text>
         </svg>
         `;
 
-        // 3. PROCESAMIENTO SHARP
+        // 4. CAPA DE DEGRADADO (CINE)
+        // Oscurece solo la parte de arriba para que el texto resalte, deja el resto transparente
+        const gradientOverlay = `
+        <svg width="${IMG_WIDTH}" height="${IMG_HEIGHT}">
+            <defs>
+                <linearGradient id="grad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:rgb(0,0,0);stop-opacity:0.9" />
+                    <stop offset="40%" style="stop-color:rgb(0,0,0);stop-opacity:0" />
+                </linearGradient>
+            </defs>
+            <rect width="${IMG_WIDTH}" height="${IMG_HEIGHT}" fill="url(#grad1)" />
+        </svg>
+        `;
+
+        // 5. COMPOSICIÓN FINAL (SHARP)
+        // Orden: Imagen Fondo -> Degradado -> Texto
         const finalImageBuffer = await sharp(imageBuffer)
             .resize(IMG_WIDTH, IMG_HEIGHT)
-            .blur(5) // Un poco menos borroso para que se vea algo del fondo
-            .modulate({ brightness: 0.65 }) // Un poco más claro
+            // ¡YA NO HAY BLUR GLOBAL! La imagen se ve nítida.
             .composite([
-                { input: Buffer.from(svgImage), gravity: 'center' }
+                { input: Buffer.from(gradientOverlay) }, // Pone la sombra arriba
+                { input: Buffer.from(svgTextOverlay) }   // Pone el texto encima
             ])
             .toFormat('jpg')
             .toBuffer();
 
-        // 4. SUBIDA A BUNNY (New York)
-        const filename = `news-${uuidv4()}.jpg`;
-        // Recuerda: Si tu zona no es "ny", cambia esto.
+        // 6. SUBIDA A BUNNY (New York)
+        const filename = `news-epic-${uuidv4()}.jpg`;
         const uploadUrl = `https://ny.storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filename}`;
 
         await axios.put(uploadUrl, finalImageBuffer, {
@@ -176,7 +179,7 @@ exports.generateNewsThumbnail = async (prompt, newsTitle) => {
         });
 
         const publicUrl = `${BUNNY_CDN_URL}/${filename}`;
-        console.log(`[ImageHandler] ✅ Miniatura creada: ${publicUrl}`);
+        console.log(`[ImageHandler] ✅ Miniatura TOP creada: ${publicUrl}`);
 
         return publicUrl;
 
