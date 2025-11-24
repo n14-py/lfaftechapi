@@ -1,27 +1,30 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN WORKER (CON ROTACIÓN DE CLAVES, FILA DE MEMORIA Y PING A SITEMAP)! ---
+// --- ¡VERSIÓN MAESTRA FINAL (RECOLECTOR + IA TEXTO + IA IMAGEN + VIDEO + TELEGRAM)! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
 const { publicarUnArticulo } = require('../utils/telegramBot');
-const { generateArticleContent } = require('../utils/bedrockClient');
 
-// --- ¡NUEVO! Configuración del Bot de Video ---
+// 1. IMPORTAMOS LAS DOS FUNCIONES DE BEDROCK (TEXTO Y PROMPT VISUAL)
+const { generateArticleContent, generateImagePrompt } = require('../utils/bedrockClient');
+
+// 2. IMPORTAMOS EL GENERADOR DE IMÁGENES (DEEPINFRA + SHARP + BUNNY)
+const { generateNewsThumbnail } = require('../utils/imageHandler');
+
+// --- Configuración del Bot de Video ---
 const VIDEO_BOT_URL = process.env.VIDEO_BOT_URL;
-// Reusamos la misma ADMIN_API_KEY que ya tienes
+// Reusamos la misma ADMIN_API_KEY
 const VIDEO_BOT_KEY = process.env.ADMIN_API_KEY; 
 
-// Tu lista de reporteros (basado en tus archivos de imagen)
+// Tu lista de reporteros (para uso interno si se requiere ampliar lógica)
 const REPORTER_IMAGES = [
     "reportera_maria.png",
     "reportero_juan.png"
-    // TODO: Añade aquí los nombres de archivo de tus otros 8+ reporteros
 ];
-// --- Fin Configuración Bot ---
 
-
-// --- Constantes (Listas de países) ---
+// --- Constantes (Listas de países y mapeo) ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
+
 const paisNewsDataMap = {
     "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
     "colombia": "co", "costa rica": "cr", "cuba": "cu", "ecuador": "ec", 
@@ -29,22 +32,25 @@ const paisNewsDataMap = {
     "nicaragua": "ni", "panama": "pa", "paraguay": "py", "peru": "pe", 
     "dominican republic": "do", "uruguay": "uy", "venezuela": "ve"
 };
+
 const PAISES_NEWSDATA = [
     "ar", "bo", "br", "cl", "co", "cr", "cu", "ec", "sv", 
     "gt", "hn", "mx", "ni", "pa", "py", "pe", "do", "uy", "ve"
 ];
+
 const PAISES_GNEWS = [
     "ar", "br", "cl", "co", "ec", "mx", "pe", "py", "uy", "ve"
 ];
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- Banderas de estado y FILA DE MEMORIA ---
 let isNewsWorkerRunning = false;
 let isFetchWorkerRunning = false;
-let globalArticleQueue = [];
+let globalArticleQueue = []; // Aquí se guardan las noticias crudas esperando IA
 let articlesProcessedSinceLastTelegram = 0;
 
-// --- Sistema de Rotación de Claves ---
+// --- Sistema de Rotación de Claves (Recuperado completo) ---
 const gnewsKeys = [
     process.env.GNEWS_API_KEY,
     process.env.GNEWS_API_KEY_2,
@@ -62,12 +68,14 @@ const newsDataKeys = [
 let currentGNewsKeyIndex = 0;
 let currentNewsDataKeyIndex = 0;
 
-// =============================================
-// PARTE 1: EL RECOLECTOR (Llamado por Cron Job o API)
-// =============================================
+
+// =========================================================================
+// PARTE 1: EL RECOLECTOR (Lógica Original Completa)
+// =========================================================================
 
 /**
  * [INTERNO / EXPORTADO] Esta es la función de trabajo pesado de RECOLECCIÓN.
+ * Busca en NewsData y GNews, rota claves si fallan y llena la fila.
  */
 const runNewsAPIFetch = async () => {
     if (isFetchWorkerRunning) {
@@ -76,6 +84,7 @@ const runNewsAPIFetch = async () => {
     }
     isFetchWorkerRunning = true;
 
+    // Reiniciamos índices al arrancar cada ciclo para probar siempre las primeras claves
     currentGNewsKeyIndex = 0;
     currentNewsDataKeyIndex = 0;
 
@@ -89,7 +98,7 @@ const runNewsAPIFetch = async () => {
         let erroresFetch = [];
         let articulosCrudos = []; 
         
-        // --- PASO 1: NEWSDATA.IO (Con rotación de claves) ---
+        // --- A. NEWSDATA.IO (Con rotación de claves) ---
         for (const pais of PAISES_NEWSDATA) {
             let success = false;
             let attempts = 0;
@@ -104,12 +113,15 @@ const runNewsAPIFetch = async () => {
                     if (response.data.results) {
                         response.data.results.forEach(article => {
                             if (!article.title || !article.link) return;
-                            const paisNombreCompleto = article.country[0];
+                            
+                            // Normalización de datos NewsData
+                            const paisNombreCompleto = article.country ? article.country[0] : 'unknown';
                             const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
+                            
                             articulosCrudos.push({
                                 title: article.title,
                                 description: article.description || 'Sin descripción.',
-                                image: article.image_url,
+                                image: article.image_url, // Imagen original (se usará si falla la IA)
                                 source: { name: article.source_id || 'Fuente Desconocida' },
                                 url: article.link,
                                 publishedAt: article.pubDate,
@@ -121,24 +133,26 @@ const runNewsAPIFetch = async () => {
 
                 } catch (e) {
                     const status = e.response?.status;
+                    // Si es error de límites o permisos, rotamos clave
                     if (status === 429 || status === 401 || status === 403) {
                         console.warn(`(Recolector) NewsData Key #${currentNewsDataKeyIndex + 1} falló (Error ${status}) para [${pais}]. Rotando clave...`);
                         currentNewsDataKeyIndex = (currentNewsDataKeyIndex + 1) % newsDataKeys.length;
                         attempts++;
                         await sleep(2000); 
                     } else {
+                        // Otros errores (500, timeout), pasamos al siguiente país
                         console.error(`(Recolector) Error NewsData [${pais}]: ${e.message}`);
                         erroresFetch.push(`NewsData-${pais}`);
                         break; 
                     }
                 }
             } 
-            
+            // Pequeña pausa entre países para no saturar
             await sleep(5000); 
         }
         console.log(`(Recolector) -> Total Obtenidos NewsData.io: ${articulosCrudos.length}.`);
 
-        // --- PASO 2: GNEWS (Con rotación de claves) ---
+        // --- B. GNEWS (Con rotación de claves) ---
         for (const pais of PAISES_GNEWS) {
             let success = false;
             let attempts = 0;
@@ -152,6 +166,7 @@ const runNewsAPIFetch = async () => {
                     
                     response.data.articles.forEach(article => {
                         if (!article.title || !article.url) return;
+                        // Normalización GNews
                         articulosCrudos.push({ ...article, paisLocal: pais });
                     });
                     success = true; 
@@ -170,29 +185,29 @@ const runNewsAPIFetch = async () => {
                     }
                 }
             }
-            
             await sleep(1000); 
         }
         console.log(`(Recolector) -> Total Obtenidos (GNews + NewsData): ${articulosCrudos.length}.`);
 
-        // --- PASO 3: DE-DUPLICACIÓN ---
+        // --- C. DE-DUPLICACIÓN (Vital para no procesar repetidos) ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
         
+        // 1. Chequear contra la Base de Datos
         const articulosExistentesDB = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
         const urlsExistentesDB = new Set(articulosExistentesDB.map(a => a.enlaceOriginal));
         
+        // 2. Chequear contra la Fila actual en memoria
         const urlsEnFila = new Set(globalArticleQueue.map(a => a.url));
 
+        // 3. Filtrar
         const articulosNuevos = articulosCrudos.filter(article => {
             return !urlsExistentesDB.has(article.url) && !urlsEnFila.has(article.url);
         });
         
-        console.log(`(Recolector) -> ${articulosCrudos.length} artículos recibidos.`);
-        console.log(`(Recolector) -> ${urlsExistentesDB.size} ya existen en la DB.`);
-        console.log(`(Recolector) -> ${urlsEnFila.size} ya estaban en la fila de espera.`);
+        console.log(`(Recolector) -> ${articulosCrudos.length} recibidos. ${urlsExistentesDB.size} ya en DB. ${urlsEnFila.size} ya en fila.`);
         console.log(`(Recolector) -> ${articulosNuevos.length} artículos son NUEVOS.`);
 
-        // --- PASO 4: AÑADIR A LA FILA DE MEMORIA ---
+        // --- D. AÑADIR A LA FILA DE MEMORIA ---
         if (articulosNuevos.length > 0) {
             globalArticleQueue.push(...articulosNuevos);
             console.log(`(Recolector) ¡${articulosNuevos.length} artículos nuevos añadidos a la fila! Total en fila: ${globalArticleQueue.length}`);
@@ -210,27 +225,30 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 
 
 /**
- * [PRIVADO] Esta es la ruta API que puedes llamar manualmente
+ * [PRIVADO] Esta es la ruta API que puedes llamar manualmente para probar la recolección
  */
 exports.syncNewsAPIs = async (req, res) => {
     res.json({ 
         message: "¡Trabajo de RECOLECCIÓN (con rotación de claves) iniciado! Añadiendo noticias a la fila en segundo plano."
     });
+    // Fire and forget
     runNewsAPIFetch();
 };
 
 
-// --- ¡NUEVA FUNCIÓN! ---
+// =========================================================================
+// PARTE 2: EL BOT DE VIDEO (Helper)
+// =========================================================================
+
 /**
  * [INTERNO] Llama al bot de Python (TTS-FMPEG) para generar un video.
- * Se ejecuta "fire-and-forget" (sin 'await' en el worker) para no bloquear el bucle.
  */
 async function _triggerVideoBot(article) {
     if (!VIDEO_BOT_URL) {
-        console.warn(`[VideoBot] No se configuró VIDEO_BOT_URL. Saltando generación de video para ${article.titulo}`);
+        console.warn(`[VideoBot] No se configuró VIDEO_BOT_URL. Saltando video.`);
         return;
     }
-    // Verificamos si el artículo AÚN existe antes de procesar
+    // Verificamos si el artículo AÚN existe
     const articleCheck = await Article.findById(article._id);
     if (!articleCheck) {
          console.warn(`[VideoBot] El artículo ${article.titulo} fue eliminado. Cancelando video.`);
@@ -240,33 +258,25 @@ async function _triggerVideoBot(article) {
     console.log(`[VideoBot] Iniciando trabajo para: ${article.titulo}`);
 
     try {
-        // 1. Marcar el artículo como "processing" (como describiste)
+        // 1. Marcar el artículo como "processing"
         articleCheck.videoProcessingStatus = 'processing';
         await articleCheck.save();
 
-        // 2. Elegir reportero al azar
-        const randomReporter = REPORTER_IMAGES[Math.floor(Math.random() * REPORTER_IMAGES.length)];
-        console.log(`[VideoBot] Reportero seleccionado: ${randomReporter}`);
-
-        // 3. Preparar datos para el bot (basado en tu TTS-FMPEG/app.py)
-        // --- CAMBIO: Enviamos la URL de la imagen real ---
+        // 2. Preparar payload. ¡OJO! Aquí enviamos la imagen (que puede ser la de BunnyCDN)
         const payload = {
             text: articleCheck.articuloGenerado, 
             title: articleCheck.titulo,            
-            // EN LUGAR DE 'image_name', AHORA ENVIAMOS 'image_url'
-            image_url: articleCheck.imagen, // <--- ¡La foto de la noticia!
+            image_url: articleCheck.imagen, // <--- Aquí va la URL (ya sea original o de Bunny)
             article_id: articleCheck._id 
         };
 
-        // 4. Llamar al bot (Esta llamada puede tardar MINUTOS)
+        // 3. Llamar al bot (Timeout largo de 10 mins)
         console.log(`[VideoBot] Llamando a ${VIDEO_BOT_URL}/generate_video...`);
         const botResponse = await axios.post(
             `${VIDEO_BOT_URL}/generate_video`,
             payload,
             { 
-                // Usamos la misma clave ADMIN_API_KEY para autenticar API -> BOT
                 headers: { 'x-api-key': VIDEO_BOT_KEY }, 
-                // Timeout largo (10 minutos) porque gTTS, FFmpeg y YouTube tardan
                 timeout: 10 * 60 * 1000 
             }
         );
@@ -277,102 +287,129 @@ async function _triggerVideoBot(article) {
             throw new Error("El bot de video no devolvió un youtubeId.");
         }
 
-        // 5. ¡Éxito! Actualizar la DB (como describiste)
+        // 4. ¡Éxito! Actualizar la DB
         console.log(`[VideoBot] ¡Éxito! ID de YouTube: ${youtubeId}. Guardando en DB.`);
         
-        // Volvemos a buscar por si acaso fue borrado durante el largo proceso
         const articleFinal = await Article.findById(article._id);
         if (articleFinal) {
             articleFinal.videoProcessingStatus = 'complete';
             articleFinal.youtubeId = youtubeId;
             await articleFinal.save();
-        } else {
-             console.warn(`[VideoBot] Video generado (${youtubeId}), pero el artículo ${article.titulo} ya no existe.`);
-        }
-
+        } 
 
     } catch (error) {
         const errorMsg = error.response ? (error.response.data.error || error.message) : error.message;
         console.error(`[VideoBot] Error fatal procesando ${article.titulo}: ${errorMsg}`);
         
-        // Marcar como 'failed' para no reintentar
+        // Marcar como 'failed'
         try {
-            // Re-buscamos el artículo por si la referencia 'article' es antigua
             const articleInDB = await Article.findById(article._id);
             if (articleInDB) {
                 articleInDB.videoProcessingStatus = 'failed';
                 await articleInDB.save();
             }
-        } catch (dbError) {
-            console.error(`[VideoBot] Error marcando como fallido: ${dbError.message}`);
-        }
+        } catch (dbError) { /* Ignorar error de DB secundario */ }
     }
 }
 
 
-// =============================================
-// PARTE 2: EL WORKER DE NOTICIAS UNIFICADO
-// =============================================
+// =========================================================================
+// PARTE 3: PING GOOGLE SITEMAP (SEO)
+// =========================================================================
 
 /**
- * [INTERNO] Envía un "ping" a Google para notificar que el sitemap se ha actualizado.
- * ¡ESTA ES LA NUEVA FUNCIÓN!
+ * [INTERNO] Envía un "ping" a Google para indexar rápido
  */
 async function _pingGoogleSitemap() {
-    // Esta es la URL de tu sitemap en el frontend de Vercel
     const sitemapUrl = 'https://www.noticias.lat/sitemap.xml';
     const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
     try {
         await axios.get(pingUrl);
         console.log(`[News Worker] ¡Sitemap "ping" enviado a Google con éxito!`);
     } catch (error) {
-        // No detenemos el worker si esto falla, solo avisamos.
-        console.warn(`[News Worker] Falló el "ping" del sitemap a Google: ${error.message}`);
+        console.warn(`[News Worker] Falló el "ping" a Google (No es crítico): ${error.message}`);
     }
 }
 
+
+// =========================================================================
+// PARTE 4: EL WORKER UNIFICADO (TEXTO + IMAGEN + VIDEO)
+// =========================================================================
+
 /**
- * [PRIVADO] Inicia el worker de Noticias
+ * [PRIVADO] Inicia el worker
  */
 exports.startNewsWorker = () => {
     if (isNewsWorkerRunning) {
         console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[News Worker] Iniciando worker (IA -> DB -> VideoBot -> Telegram c/11 -> Ping Google)...");
+    console.log("[News Worker] Iniciando worker (IA Texto -> IA Imagen -> DB -> VideoBot -> Telegram)...");
     isNewsWorkerRunning = true;
     _runNewsWorker(); 
 };
 
 /**
- * [INTERNO] El bucle infinito que procesa artículos de la FILA DE MEMORIA
+ * [INTERNO] El bucle infinito que procesa la fila
  */
 async function _runNewsWorker() {
     while (isNewsWorkerRunning) {
         let articleToProcess = null;
         try {
-            // 1. Buscar un artículo en la FILA DE MEMORIA
+            // 1. ¿Hay trabajo?
             if (globalArticleQueue.length === 0) {
-                await sleep(1 * 60 * 1000); 
+                await sleep(1 * 60 * 1000); // Esperar 1 minuto si está vacío
                 continue; 
             }
 
-            // 2. ¡Encontramos trabajo! Tomar el próximo artículo
+            // 2. Tomar noticia de la fila
             articleToProcess = globalArticleQueue.shift(); 
             
-            console.log(`[News Worker] Fila restante: ${globalArticleQueue.length}. Procesando IA para: ${articleToProcess.title}`);
+            console.log(`[News Worker] Fila restante: ${globalArticleQueue.length}. Procesando: ${articleToProcess.title}`);
 
-            // 3. Llamar a AWS Bedrock (IA)
+            // -------------------------------------------------------------
+            // PASO A: GENERAR CONTENIDO TEXTUAL (BEDROCK)
+            // -------------------------------------------------------------
             const resultadoIA = await generateArticleContent(articleToProcess);
 
-            // 4. Guardar el resultado (o marcar como fallido)
+            // Solo procedemos si hay texto generado
             if (resultadoIA && resultadoIA.articuloGenerado && resultadoIA.categoriaSugerida) {
                 
-                // 5. ¡ÉXITO! GUARDAR EN LA BASE DE DATOS
+                // -------------------------------------------------------------
+                // PASO B: GENERAR IMAGEN PRO (DEEPINFRA + BUNNY)
+                // -------------------------------------------------------------
+                let finalImageUrl = articleToProcess.image; // Por defecto: la imagen original
+                
+                try {
+                    console.log("[News Worker] 🎨 Paso de Imagen: Generando Prompt Visual...");
+                    
+                    // B1. Pedir Prompt a Bedrock (basado en el texto generado)
+                    const imagePrompt = await generateImagePrompt(articleToProcess.title, resultadoIA.articuloGenerado);
+                    
+                    if (imagePrompt) {
+                        console.log(`[News Worker] 🖼️ Prompt listo. Creando Miniatura con DeepInfra...`);
+                        
+                        // B2. Generar, Editar y Subir a Bunny
+                        const bunnyUrl = await generateNewsThumbnail(imagePrompt, articleToProcess.title);
+                        
+                        if (bunnyUrl) {
+                            console.log(`[News Worker] ✅ ¡Imagen Pro Creada!: ${bunnyUrl}`);
+                            finalImageUrl = bunnyUrl; // ¡Reemplazamos la imagen original!
+                        } else {
+                            console.warn("[News Worker] Falló DeepInfra/Bunny. Usando imagen original como fallback.");
+                        }
+                    }
+                } catch (imgError) {
+                    console.error(`[News Worker] Error en flujo de imagen (no crítico): ${imgError.message}`);
+                }
+                
+                // -------------------------------------------------------------
+                // PASO C: GUARDAR EN BASE DE DATOS
+                // -------------------------------------------------------------
                 const newArticle = new Article({
                     titulo: articleToProcess.title,
                     descripcion: articleToProcess.description,
-                    imagen: articleToProcess.image,
+                    imagen: finalImageUrl, // La de Bunny o la original
                     sitio: 'noticias.lat',
                     categoria: resultadoIA.categoriaSugerida,
                     pais: articleToProcess.paisLocal,
@@ -381,123 +418,138 @@ async function _runNewsWorker() {
                     fecha: new Date(articleToProcess.publishedAt),
                     articuloGenerado: resultadoIA.articuloGenerado,
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending' // Estado inicial
+                    videoProcessingStatus: 'pending' // Estado inicial para el bot de video
                 });
                 
                 await newArticle.save();
                 console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
 
-                // --- ¡¡AQUÍ ES!! LLAMAR AL BOT DE VIDEO (SIN AWAIT) ---
-                // Esto lo ejecuta en segundo plano y el bucle continúa
+                // -------------------------------------------------------------
+                // PASO D: DISPARAR BOT DE VIDEO
+                // -------------------------------------------------------------
+                // Sin await, para que el worker siga con la siguiente noticia
                 _triggerVideoBot(newArticle);
-                // --------------------------------------------------
 
-                // 6. LÓGICA DE TELEGRAM Y SITEMAP (CADA 11)
+                // -------------------------------------------------------------
+                // PASO E: TELEGRAM Y GOOGLE (Cada 11 noticias)
+                // -------------------------------------------------------------
                 articlesProcessedSinceLastTelegram++;
                 
                 if (articlesProcessedSinceLastTelegram >= 11) {
-                    console.log(`[News Worker] ¡Artículo #${articlesProcessedSinceLastTelegram}! Enviando a Telegram y Google...`);
+                    console.log(`[News Worker] ¡Lote de 11! Enviando notificación a Telegram y Google...`);
                     
-                    // 1. Enviar a Telegram
+                    // Telegram
                     await publicarUnArticulo(newArticle); 
-                    
-                    // 2. ¡NUEVO! Enviar ping a Google
-                    await _pingGoogleSitemap(); // <-- ¡AQUÍ ESTÁ LA LLAMADA!
+                    // Google
+                    await _pingGoogleSitemap();
 
-                    articlesProcessedSinceLastTelegram = 0; // Reiniciar contador
+                    articlesProcessedSinceLastTelegram = 0; 
                 } else {
-                    console.log(`[News Worker] Artículo #${articlesProcessedSinceLastTelegram}/11. (No se envía a Telegram ni Google).`);
+                    console.log(`[News Worker] Contador Telegram: ${articlesProcessedSinceLastTelegram}/11.`);
                 }
                 
             } else {
-                console.warn(`[News Worker] Fallo de IA para ${articleToProcess.title}. Artículo descartado, no se guardará en DB.`);
+                console.warn(`[News Worker] Fallo de IA Texto para ${articleToProcess.title}. Descartado.`);
             }
             
-            // 7. Pausa de 30 segundos
+            // Pausa de seguridad (30 seg)
             console.log("[News Worker] Pausa de 30 segundos...");
             await sleep(30 * 1000); 
 
         } catch (error) {
             if (error.code === 11000) {
-                 console.warn(`[News Worker] Error de duplicado al guardar ${articleToProcess?.title}. Saltando.`);
+                 console.warn(`[News Worker] Duplicado detectado al guardar. Saltando.`);
             } else {
                 console.error(`[News Worker] Error fatal procesando ${articleToProcess?.title}: ${error.message}`);
             }
+            // En caso de error grave, pausa de 1 min
             await sleep(1 * 60 * 1000);
         }
     }
 }
 
 
-// =============================================
-// PARTE 3: RUTAS MANUALES Y SITEMAP
-// =============================================
+// =========================================================================
+// PARTE 5: CREACIÓN MANUAL (API)
+// =========================================================================
 
 /**
- * [PRIVADO] Añadir un nuevo artículo manualmente
+ * [PRIVADO] Añadir un nuevo artículo manualmente.
+ * TAMBIÉN intenta generar la imagen si no se provee una.
  */
 exports.createManualArticle = async (req, res) => {
     try {
         const { titulo, descripcion, imagen, sitio, fuente, enlaceOriginal, fecha, pais } = req.body;
         
         if (!enlaceOriginal || !enlaceOriginal.startsWith('http')) {
-             return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio para que la IA trabaje." });
+             return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio." });
         }
         
+        // 1. Generar Texto IA
         const resultadoIA = await generateArticleContent({ url: enlaceOriginal, title: titulo });
 
         if (!resultadoIA) {
-            return res.status(500).json({ error: "La IA (Bedrock) no pudo procesar la URL proporcionada." });
+            return res.status(500).json({ error: "Bedrock no pudo procesar la URL." });
+        }
+
+        // 2. Generar Imagen IA (Si el usuario no subió una propia o quiere forzarla)
+        let finalImageUrl = imagen; 
+        
+        // Si no mandas imagen, o quieres que el sistema la haga, aquí entra la magia:
+        if (!finalImageUrl) {
+            console.log("[Manual] Usuario no proveyó imagen. Generando con IA...");
+            try {
+                const prompt = await generateImagePrompt(titulo, resultadoIA.articuloGenerado);
+                const bunnyUrl = await generateNewsThumbnail(prompt, titulo);
+                if (bunnyUrl) {
+                    finalImageUrl = bunnyUrl;
+                }
+            } catch (e) {
+                console.error("Error generando imagen manual:", e.message);
+                // Si falla, se quedará como null (o podrías poner una placeholder)
+            }
         }
 
         const newArticle = new Article({
-            titulo: titulo || 'Título no proporcionado (IA)',
-            descripcion: descripcion || 'Descripción no proporcionada (IA)',
-            imagen: imagen || null,
+            titulo: titulo || 'Título Generado',
+            descripcion: descripcion || 'Descripción Generada',
+            imagen: finalImageUrl,
             sitio: sitio || 'noticias.lat',
-            fuente: fuente || 'Fuente desconocida',
+            fuente: fuente || 'Fuente Manual',
             enlaceOriginal: enlaceOriginal,
             fecha: fecha ? new Date(fecha) : new Date(),
             pais: pais || null,
             articuloGenerado: resultadoIA.articuloGenerado,
             categoria: resultadoIA.categoriaSugerida,
             telegramPosted: false,
-            videoProcessingStatus: 'pending' // Estado inicial
+            videoProcessingStatus: 'pending'
         });
 
         await newArticle.save();
         
-        // --- ¡ACTUALIZADO! ---
-        // Los artículos manuales también avisan a Telegram Y a Google.
+        // Disparar todo
         try {
-            console.log("Artículo manual guardado. Enviando a Telegram, Google y Bot de Video...");
-            
-            // 1. Llama al Bot de Video (sin await)
-             _triggerVideoBot(newArticle);
-
-            // 2. Llama a Telegram
+            console.log("Artículo manual guardado. Activando Bots...");
+            _triggerVideoBot(newArticle);
             await publicarUnArticulo(newArticle);
-
-            // 3. Llama a Google
-            await _pingGoogleSitemap(); // <-- ¡AQUÍ TAMBIÉN!
-
-        } catch (telegramError) {
-            console.error("Artículo manual guardado, pero falló al enviar notificaciones:", telegramError.message);
+            await _pingGoogleSitemap();
+        } catch (botError) {
+            console.error("Error en notificaciones manuales:", botError.message);
         }
         
         res.status(201).json(newArticle);
         
     } catch (error) { 
         if (error.code === 11000) { 
-             return res.status(409).json({ error: "Error: Ya existe un artículo con ese enlace original." });
+             return res.status(409).json({ error: "Ya existe un artículo con esa URL." });
         }
         console.error("Error en createManualArticle:", error);
-        res.status(500).json({ error: "Error al guardar el artículo." });
+        res.status(500).json({ error: "Error interno al guardar." });
     }
 };
 
 /**
- * [PÚBLICO] Generar el Sitemap.xml
+ * [PÚBLICO] Generar Sitemap
  */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat'; 
@@ -531,7 +583,7 @@ exports.getSitemap = async (req, res) => {
             xml += '<url>';
             xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`; 
             xml += `<lastmod>${articleDate}</lastmod>`;
-            xml += '<changefreq>weekly</changefreq>'; 
+            xml += '<changefreq>weekly</changefreq>';
             xml += '<priority>0.90</priority>';
             xml += '</url>';
         });

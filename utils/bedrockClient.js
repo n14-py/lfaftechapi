@@ -55,7 +55,7 @@ async function fetchUrlContent(url) {
     }
 }
 
-// --- 3. FUNCIÓN PARA RADIOS (Sin cambios solicitados, se mantiene igual) ---
+// --- 3. FUNCIÓN PARA RADIOS (Existente) ---
 exports.generateRadioDescription = async (radio) => {
     const { nombre, pais, generos } = radio;
     const systemPrompt = `Eres un experto en SEO y redactor de contenido para 'TuRadio.lat'. Tu tarea es escribir una descripción extensa (mínimo 600-700 palabras), atractiva y optimizada para motores de búsqueda (SEO) sobre una estación de radio específica.
@@ -94,11 +94,11 @@ Directrices estrictas:
 };
 
 
-// --- 4. FUNCIÓN PARA ARTÍCULOS (¡MODIFICADA SEGÚN TUS ÓRDENES!) ---
+// --- 4. FUNCIÓN PARA ARTÍCULOS (Existente) ---
 exports.generateArticleContent = async (article) => {
     
     // Datos originales
-    const { url, title, description, paisLocal } = article; // Asumimos que article trae description y paisLocal
+    const { url, title, description, paisLocal } = article; 
 
     if (!url || !url.startsWith('http')) {
         console.error(`Error: URL inválida para "${title}".`);
@@ -121,44 +121,32 @@ ${contenidoReal}
 --- FIN CONTENIDO EXTRAÍDO ---`;
 
     } else {
-        // CASO B: NO PUDIMOS LEER (O era muy poco texto) -> FALLBACK
-        console.log(`[BedrockClient] No se pudo leer la web (o estaba vacía). Usando Plan B (Título + Descripción + Búsqueda interna).`);
+        // CASO B: NO PUDIMOS LEER -> FALLBACK
+        console.log(`[BedrockClient] No se pudo leer la web. Usando Plan B.`);
         promptContexto = `No pude acceder al contenido completo de la URL. 
 Debes redactar la noticia basándote ESTRICTAMENTE en la siguiente información disponible:
 - Título: "${title}"
 - Descripción breve: "${description || 'Sin descripción'}"
 - País: "${paisLocal || 'Internacional'}"
 
-INSTRUCCIÓN DE BÚSQUEDA: Usa tu base de conocimiento para identificar de qué trata esta noticia (basado en el título y país) y complétala. NO INVENTES HECHOS que no sean lógicos o verificables por el contexto.`;
+INSTRUCCIÓN: Usa tu base de conocimiento para identificar de qué trata esta noticia y complétala.`;
     }
 
-    // --- SYSTEM PROMPT (LAS REGLAS DE ORO) ---
-// --- SYSTEM PROMPT (LAS REGLAS DE ORO - VERSIÓN EXTENDIDA) ---
+   
     const systemPrompt = `Eres un redactor jefe de noticias internacionales para 'Noticias.lat'.
     
 Tu objetivo es crear artículos **DETALLADOS, PROFUNDOS Y COMPLETOS** (Mínimo 400-600 palabras).
 
-REGLAS PARA EXTENDER LA NOTICIA SIN MENTIR:
-1. **SI LA FUENTE ES CORTA, NO SEAS BREVE:** Tu trabajo es "rellenar" con CONTEXTO y ANÁLISIS, no con invenciones.
-   - **Contextualiza:** Explica quiénes son los actores (países, personas, empresas), su historia reciente y por qué son importantes.
-   - **Analiza:** Explica las posibles consecuencias de este evento.
-   - **Antecedentes:** Menciona si esto ha pasado antes o qué llevó a esta situación.
-   *Ejemplo:* Si la noticia es "Subió el precio del petróleo", no inventes el precio. Explica qué es la OPEP, cómo afecta la guerra actual al mercado y cómo impacta al consumidor común.
+REGLAS PARA EXTENDER LA NOTICIA:
+1. **Contextualiza:** Explica quiénes son los actores, su historia reciente y por qué son importantes.
+2. **Analiza:** Explica las posibles consecuencias de este evento.
+3. **Antecedentes:** Menciona si esto ha pasado antes.
+4. **VERACIDAD:** Los datos duros SÓLO pueden salir de la fuente proporcionada. NO inventes cifras.
 
-2. **VERACIDAD:**
-   - Los datos duros (cifras, fechas, nombres del evento actual) SÓLO pueden salir de la fuente proporcionada. NO inventes cifras.
-   - Usa tu Base de Conocimiento para explicar conceptos, biografías y geopolítica general.
+FORMATO DE SALIDA ESTRICTO:
+LÍNEA 1: La categoría (UNA SOLA PALABRA: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
+LÍNEA 2 en adelante: El cuerpo de la noticia completo.`;
 
-3. **ESTILO:**
-   - Periodístico, formal pero atrapante.
-   - Usa párrafos bien estructurados.
-
-4. **FORMATO DE SALIDA ESTRICTO:**
-   LÍNEA 1: La categoría (UNA SOLA PALABRA: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-   LÍNEA 2 en adelante: El cuerpo de la noticia completo.`;
-
-
-   
     const userPrompt = `Redacta la noticia para esta URL: ${url}
     
 ${promptContexto}`;
@@ -170,7 +158,7 @@ ${promptContexto}`;
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
             max_tokens: 4000, 
-            temperature: 0.4, // Bajamos temperatura para que sea más fiel a los hechos y alucine menos
+            temperature: 0.4, 
             system: systemPrompt,
             messages: [
                 {
@@ -191,7 +179,6 @@ ${promptContexto}`;
             
             const lines = responseText.split('\n');
             if (lines.length < 2) {
-                // Fallback si no respeta formato
                 return { categoriaSugerida: "general", articuloGenerado: responseText };
             }
             
@@ -204,8 +191,6 @@ ${promptContexto}`;
                  articuloGenerado = responseText; 
             }
             
-            console.log(`-> IA Generó noticia para "${title}". Longitud: ${articuloGenerado.length} chars.`);
-            
             return {
                 categoriaSugerida: categoriaSugerida,
                 articuloGenerado: articuloGenerado
@@ -216,5 +201,64 @@ ${promptContexto}`;
     } catch (error) {
         console.error(`Error Bedrock News:`, error.message);
         return null; 
+    }
+};
+
+// --- 5. ¡NUEVO! FUNCIÓN PARA GENERAR EL PROMPT VISUAL (SDXL) ---
+exports.generateImagePrompt = async (title, content) => {
+    // Si no hay contenido suficiente, usamos el título
+    const textContext = content.length > 500 ? content.substring(0, 1500) : title;
+
+    const systemPrompt = `You are an expert AI Art Director for a YouTube News Channel. 
+Your task is to write a single, highly descriptive prompt in English for an image generator (SDXL) based on a news story.
+
+--- SAFETY & CENSORSHIP RULES (EXTREMELY IMPORTANT) ---
+1. **ACCIDENTS/TRAGEDIES:** If the news is about a crash, murder, or death, DO NOT describe blood, gore, or bodies. Instead, describe: "Police tape, flashing ambulance lights, shattered glass on the floor, dramatic night lighting, tense atmosphere".
+2. **REAL PEOPLE:** If the news mentions a famous person (e.g., Trump, Messi, Shakira), **USE THEIR FULL NAME** in the prompt. Do not describe them generically. We want the AI to generate their actual likeness.
+
+--- STYLE GUIDELINES ---
+- The image must be **PHOTOREALISTIC** and **DRAMATIC**.
+- NO TEXT in the image description (we will add text later).
+- Focus on the **Subject** and the **Lighting**.
+- Keywords to always include: "8k, masterpiece, trending on artstation, cinematic lighting, hyperrealistic, shallow depth of field, bokeh background".
+
+--- OUTPUT FORMAT ---
+Just the prompt string in English. Nothing else.`;
+
+    const userPrompt = `Generate an SDXL prompt for this news story:
+Title: "${title}"
+Context: "${textContext}..."`;
+
+    const payload = {
+        modelId: MODEL_ID,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+            anthropic_version: 'bedrock-2023-05-31',
+            max_tokens: 500, // No necesitamos mucho texto
+            temperature: 0.7, // Creatividad alta para la imagen
+            system: systemPrompt,
+            messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
+        })
+    };
+
+    try {
+        const command = new InvokeModelCommand(payload);
+        const response = await client.send(command);
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+        
+        if (responseBody.content && responseBody.content.length > 0) {
+            let prompt = responseBody.content[0].text.trim();
+            // Limpieza extra por si acaso
+            prompt = prompt.replace('Prompt:', '').replace('SDXL Prompt:', '').trim();
+            console.log(`[Bedrock Image] Prompt generado: "${prompt.substring(0, 50)}..."`);
+            return prompt;
+        }
+        return null;
+
+    } catch (error) {
+        console.error(`Error Bedrock Image Prompt:`, error.message);
+        // Fallback simple si falla la IA
+        return `hyperrealistic news image about ${title}, cinematic lighting, 8k, dramatic`; 
     }
 };
