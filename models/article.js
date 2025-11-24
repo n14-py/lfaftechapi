@@ -1,3 +1,4 @@
+// Archivo: lfaftechapi/models/article.js
 const mongoose = require('mongoose');
 
 // Este es el "molde" universal para todos los artículos
@@ -7,9 +8,10 @@ const ArticleSchema = new mongoose.Schema({
     imagen: { type: String, required: true },
     
     // 'categoria' será "general", "deportes", "tecnologia", etc.
+    // (Gracias a bedrockClient.js, ahora siempre llegará limpia y en minúsculas)
     categoria: { type: String, required: true, index: true }, 
     
-    // 'sitio' será "noticias.lat", "pelis.lat", etc.
+    // 'sitio' será "noticias.lat", etc.
     sitio: { type: String, required: true, index: true }, 
 
     // 'pais' (ej. 'py', 'cl', 'ar', o null si es regional)
@@ -22,12 +24,17 @@ const ArticleSchema = new mongoose.Schema({
     telegramPosted: { type: Boolean, default: false, index: true },
 
     // --- CAMPOS PARA EL BOT DE YOUTUBE ---
+    // 'pending': Esperando turno
+    // 'processing': El bot de Python lo está creando
+    // 'complete': Ya existe en YouTube
+    // 'failed': Algo salió mal
     videoProcessingStatus: { 
         type: String, 
         enum: ['pending', 'processing', 'complete', 'failed'], 
         default: 'pending', 
         index: true 
     },
+    // El ID del video de YouTube (ej: dQw4w9WgXcQ)
     youtubeId: { type: String, sparse: true },
     // --- FIN DE CAMPOS DE YOUTUBE ---
 
@@ -41,24 +48,18 @@ const ArticleSchema = new mongoose.Schema({
 // 🚀 OPTIMIZACIÓN DE ÍNDICES (Estrategia "Máximo Espacio")
 // =========================================================
 
-// 1. ÍNDICE DE BÚSQUEDA LIGERO (Vital para ahorrar espacio)
-// Al NO indexar 'articuloGenerado', ahorras cientos de MBs.
-// El buscador encontrará noticias por título y descripción.
+// 1. ÍNDICE DE BÚSQUEDA DE TEXTO (Vital para el buscador)
+// Esto permite buscar palabras dentro del título y descripción.
 ArticleSchema.index({ 
     titulo: 'text', 
     descripcion: 'text' 
 });
 
 // 2. ÍNDICES COMPUESTOS (Para velocidad en la Home y Filtros)
+// Ayudan a mostrar "Lo último de Política" o "Lo último de Argentina" rapidísimo.
 ArticleSchema.index({ sitio: 1, fecha: -1 });
 ArticleSchema.index({ pais: 1, fecha: -1 });
 ArticleSchema.index({ categoria: 1, fecha: -1 });
-
-// 3. LIMPIEZA AUTOMÁTICA (DESACTIVADA)
-// Hemos quitado el índice TTL. Las noticias se guardarán PARA SIEMPRE
-// o hasta que se llene el plan gratuito.
-// ArticleSchema.index({ fecha: 1 }, { expireAfterSeconds: 7776000 }); <--- ELIMINADO
-
 
 // Exportamos el modelo
 module.exports = mongoose.model('Article', ArticleSchema);

@@ -1,7 +1,8 @@
+// Archivo: lfaftechapi/utils/bedrockClient.js
 require('dotenv').config();
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const axios = require('axios');
-const cheerio = require('cheerio'); // Necesario para "leer" el HTML de la web
+const cheerio = require('cheerio');
 
 // --- 1. Cargar Claves de AWS (Bedrock) ---
 const { AWS_BEDROCK_ACCESS_KEY_ID, AWS_BEDROCK_SECRET_ACCESS_KEY, AWS_BEDROCK_REGION } = process.env;
@@ -23,39 +24,74 @@ exports.InvokeModelCommand = InvokeModelCommand;
 
 const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
 
-// --- HELPER: Función para "Leer" la URL (Scraping básico) ---
+
+// ============================================================================
+// 🛠️ HELPERS (HERRAMIENTAS DE LIMPIEZA Y SCRAPING)
+// ============================================================================
+
+/**
+ * Limpiador de Categorías (SOLUCIÓN DEFINITIVA)
+ * Convierte "Tecnología", "POLITICA", "[Deportes]" -> "tecnologia", "politica", "deportes"
+ */
+function cleanCategory(rawCategory) {
+    if (!rawCategory) return "general";
+
+    // 1. Quitar basura ([Categoría], "Texto", etc)
+    let cleaned = rawCategory.toLowerCase()
+        .replace('categoría:', '')
+        .replace('categoria:', '')
+        .replace(/\[|\]|"/g, '') // Quitar corchetes y comillas
+        .trim();
+
+    // 2. Quitar acentos (Á -> a, é -> e, ñ -> n)
+    cleaned = cleaned.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    // 3. Validar contra lista oficial
+    const validCats = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
+    
+    if (validCats.includes(cleaned)) {
+        return cleaned;
+    }
+    
+    // Fallback inteligente (si la IA inventó algo raro)
+    return "general";
+}
+
+/**
+ * Helper para descargar el contenido HTML de una URL
+ */
 async function fetchUrlContent(url) {
     try {
-        // Intentamos descargar el HTML con un timeout de 4 segundos para no trabar el proceso
+        // Intentamos descargar el HTML con un timeout de 5 segundos
         const { data } = await axios.get(url, { 
-            timeout: 4000,
+            timeout: 5000,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
         });
         
         const $ = cheerio.load(data);
         
-        // Eliminamos scripts, estilos y cosas que no son noticia
-        $('script').remove();
-        $('style').remove();
-        $('nav').remove();
-        $('footer').remove();
-        $('header').remove();
+        // Eliminamos scripts, estilos y basura
+        $('script, style, nav, footer, header, iframe, .ads').remove();
 
-        // Extraemos solo los párrafos
+        // Extraemos el texto de los párrafos
         let text = '';
         $('p').each((i, el) => {
             text += $(el).text() + '\n';
         });
 
-        // Limpiamos espacios extra y cortamos si es excesivamente largo (para no gastar tokens infinitos)
+        // Limpiamos y cortamos para no gastar tokens infinitos
         return text.trim().substring(0, 15000); 
     } catch (error) {
-        console.warn(`[BedrockClient] No se pudo leer el contenido HTML de ${url}: ${error.message}`);
-        return null; // Si falla, devolvemos null y usamos el plan B
+        console.warn(`[BedrockClient] No se pudo leer contenido de ${url}: ${error.message}`);
+        return null; 
     }
 }
 
-// --- 3. FUNCIÓN PARA RADIOS (Existente) ---
+
+// ============================================================================
+// 📻 FUNCIÓN 1: GENERADOR DE RADIOS (ORIGINAL)
+// ============================================================================
+
 exports.generateRadioDescription = async (radio) => {
     const { nombre, pais, generos } = radio;
     const systemPrompt = `Eres un experto en SEO y redactor de contenido para 'TuRadio.lat'. Tu tarea es escribir una descripción extensa (mínimo 600-700 palabras), atractiva y optimizada para motores de búsqueda (SEO) sobre una estación de radio específica.
@@ -94,127 +130,20 @@ Directrices estrictas:
 };
 
 
-// --- 4. FUNCIÓN PARA ARTÍCULOS (Existente) ---
-exports.generateArticleContent = async (article) => {
-    
-    // Datos originales
-    const { url, title, description, paisLocal } = article; 
+// ============================================================================
+// 🎨 FUNCIÓN 2: GENERADOR DE PROMPT VISUAL (SDXL)
+// ============================================================================
 
-    if (!url || !url.startsWith('http')) {
-        console.error(`Error: URL inválida para "${title}".`);
-        return null;
-    }
-
-    // 1. Intentamos "Entrar" a la URL
-    console.log(`[BedrockClient] Intentando leer contenido real de: ${url}...`);
-    const contenidoReal = await fetchUrlContent(url);
-
-    let promptContexto = "";
-    
-    if (contenidoReal && contenidoReal.length > 500) {
-        // CASO A: PUDIMOS LEER LA PÁGINA
-        console.log(`[BedrockClient] ¡Lectura exitosa! (${contenidoReal.length} caracteres leídos). Enviando contenido real a la IA.`);
-        promptContexto = `He logrado extraer el contenido textual de la URL. Úsalo como fuente principal y única verdad:
-        
---- INICIO CONTENIDO EXTRAÍDO ---
-${contenidoReal}
---- FIN CONTENIDO EXTRAÍDO ---`;
-
-    } else {
-        // CASO B: NO PUDIMOS LEER -> FALLBACK
-        console.log(`[BedrockClient] No se pudo leer la web. Usando Plan B.`);
-        promptContexto = `No pude acceder al contenido completo de la URL. 
-Debes redactar la noticia basándote ESTRICTAMENTE en la siguiente información disponible:
-- Título: "${title}"
-- Descripción breve: "${description || 'Sin descripción'}"
-- País: "${paisLocal || 'Internacional'}"
-
-INSTRUCCIÓN: Usa tu base de conocimiento para identificar de qué trata esta noticia y complétala.`;
-    }
-
-   
-    const systemPrompt = `Eres un redactor jefe de noticias internacionales para 'Noticias.lat'.
-    
-Tu objetivo es crear artículos **DETALLADOS, PROFUNDOS Y COMPLETOS** (Mínimo 400-600 palabras).
-
-REGLAS PARA EXTENDER LA NOTICIA:
-1. **Contextualiza:** Explica quiénes son los actores, su historia reciente y por qué son importantes.
-2. **Analiza:** Explica las posibles consecuencias de este evento.
-3. **Antecedentes:** Menciona si esto ha pasado antes.
-4. **VERACIDAD:** Los datos duros SÓLO pueden salir de la fuente proporcionada. NO inventes cifras.
-
-FORMATO DE SALIDA ESTRICTO:
-LÍNEA 1: La categoría (UNA SOLA PALABRA: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2 en adelante: El cuerpo de la noticia completo.`;
-
-    const userPrompt = `Redacta la noticia para esta URL: ${url}
-    
-${promptContexto}`;
-
-    const payload = {
-        modelId: MODEL_ID,
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify({
-            anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 4000, 
-            temperature: 0.4, 
-            system: systemPrompt,
-            messages: [
-                {
-                    role: 'user',
-                    content: [{ type: 'text', text: userPrompt }]
-                }
-            ]
-        })
-    };
-
-    try {
-        const command = new InvokeModelCommand(payload);
-        const response = await client.send(command);
-        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-        if (responseBody.content && responseBody.content.length > 0) {
-            let responseText = responseBody.content[0].text.trim();
-            
-            const lines = responseText.split('\n');
-            if (lines.length < 2) {
-                return { categoriaSugerida: "general", articuloGenerado: responseText };
-            }
-            
-            let categoriaSugerida = lines[0].trim().toLowerCase().replace('.', '');
-            let articuloGenerado = lines.slice(1).join('\n').trim();
-            
-            const categoriasValidas = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
-            if (!categoriasValidas.includes(categoriaSugerida)) {
-                 categoriaSugerida = "general";
-                 articuloGenerado = responseText; 
-            }
-            
-            return {
-                categoriaSugerida: categoriaSugerida,
-                articuloGenerado: articuloGenerado
-            };
-        }
-        return null;
-
-    } catch (error) {
-        console.error(`Error Bedrock News:`, error.message);
-        return null; 
-    }
-};
-
-// --- 5. ¡NUEVO! FUNCIÓN PARA GENERAR EL PROMPT VISUAL (SDXL) ---
 exports.generateImagePrompt = async (title, content) => {
-    // Si no hay contenido suficiente, usamos el título
+    // Usamos un fragmento del contenido para dar contexto
     const textContext = content.length > 500 ? content.substring(0, 1500) : title;
 
-    const systemPrompt = `You are an expert AI Art Director for a YouTube News Channel. 
-Your task is to write a single, highly descriptive prompt in English for an image generator (SDXL) based on a news story.
+    const systemPrompt = `You are an expert AI Art Director for a News Channel. 
+Your task is to write a single, highly descriptive prompt in English for an image generator (SDXL).
 
---- SAFETY & CENSORSHIP RULES (EXTREMELY IMPORTANT) ---
+--- SAFETY & CENSORSHIP RULES ---
 1. **ACCIDENTS/TRAGEDIES:** If the news is about a crash, murder, or death, DO NOT describe blood, gore, or bodies. Instead, describe: "Police tape, flashing ambulance lights, shattered glass on the floor, dramatic night lighting, tense atmosphere".
-2. **REAL PEOPLE:** If the news mentions a famous person (e.g., Trump, Messi, Shakira), **USE THEIR FULL NAME** in the prompt. Do not describe them generically. We want the AI to generate their actual likeness.
+2. **REAL PEOPLE:** If the news mentions a famous person (e.g., Trump, Messi, Shakira), **USE THEIR FULL NAME** in the prompt so the AI generates their likeness.
 
 --- STYLE GUIDELINES ---
 - The image must be **PHOTOREALISTIC** and **DRAMATIC**.
@@ -235,8 +164,8 @@ Context: "${textContext}..."`;
         accept: 'application/json',
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 500, // No necesitamos mucho texto
-            temperature: 0.7, // Creatividad alta para la imagen
+            max_tokens: 500, 
+            temperature: 0.7, 
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
@@ -249,8 +178,11 @@ Context: "${textContext}..."`;
         
         if (responseBody.content && responseBody.content.length > 0) {
             let prompt = responseBody.content[0].text.trim();
-            // Limpieza extra por si acaso
-            prompt = prompt.replace('Prompt:', '').replace('SDXL Prompt:', '').trim();
+            // Limpieza extra por si acaso la IA contesta "Here is the prompt: ..."
+            prompt = prompt.replace(/^(Here is the prompt:|Prompt:|SDXL Prompt:)/i, '').trim();
+            // Quitamos comillas si las puso
+            prompt = prompt.replace(/^"|"$/g, '');
+            
             console.log(`[Bedrock Image] Prompt generado: "${prompt.substring(0, 50)}..."`);
             return prompt;
         }
@@ -260,5 +192,114 @@ Context: "${textContext}..."`;
         console.error(`Error Bedrock Image Prompt:`, error.message);
         // Fallback simple si falla la IA
         return `hyperrealistic news image about ${title}, cinematic lighting, 8k, dramatic`; 
+    }
+};
+
+
+// ============================================================================
+// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS VIRALES (TEXTO + DATOS EXTRA)
+// ============================================================================
+
+exports.generateArticleContent = async (article) => {
+    const { url, title, description, paisLocal } = article; 
+
+    if (!url || !url.startsWith('http')) {
+        console.error(`Error: URL inválida para "${title}".`);
+        return null;
+    }
+
+    // 1. Intentamos leer el contenido real de la web
+    console.log(`[BedrockClient] Leyendo URL: ${url}...`);
+    const contenidoReal = await fetchUrlContent(url);
+
+    let promptContexto = "";
+    if (contenidoReal && contenidoReal.length > 300) {
+        promptContexto = `FUENTE REAL (Úsala como verdad absoluta):\n--- INICIO ---\n${contenidoReal}\n--- FIN ---`;
+    } else {
+        promptContexto = `FUENTE LIMITADA (Completa con tu conocimiento general):\nTítulo: "${title}"\nDescripción: "${description || 'Sin descripción'}"\nPaís: "${paisLocal || 'Internacional'}"`;
+    }
+
+    // --- SYSTEM PROMPT MAESTRO (ESTRUCTURA ESTRICTA) ---
+    const systemPrompt = `Eres el Editor Jefe de 'Noticias.lat'. Tu misión es crear contenido VIRAL pero VERAZ.
+
+TU TAREA: Analiza la fuente y genera una respuesta con una ESTRUCTURA ESTRICTA de 4 partes.
+
+--- ESTRUCTURA DE SALIDA OBLIGATORIA ---
+LÍNEA 1: [CATEGORÍA] (Una sola palabra: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
+LÍNEA 2: TÍTULO VIRAL: [Aquí escribe un título web largo, de 8 a 12 palabras, muy clickbait pero honesto. Ej: "El error histórico que podría costar millones al gobierno esta semana"].
+LÍNEA 3: TEXTO IMAGEN: [Aquí escribe SOLO 2 o 3 PALABRAS de máximo impacto visual para la miniatura. Ej: "CAOS TOTAL", "ADIÓS DÓLAR", "TRIUNFO HISTÓRICO", "ALERTA MÁXIMA"].
+LÍNEA 4 en adelante: [CUERPO DE LA NOTICIA] (Mínimo 500 palabras. Contextualiza, explica antecedentes y consecuencias. Sé profundo).
+
+--- REGLAS DE REDACCIÓN ---
+1. Si la noticia es trágica, sé respetuoso pero dramático.
+2. NO inventes cifras ni fechas que no estén en la fuente.
+3. Usa párrafos cortos y atrapantes.
+`;
+
+    const userPrompt = `Procesa esta noticia: ${url}
+    
+${promptContexto}`;
+
+    const payload = {
+        modelId: MODEL_ID,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+            anthropic_version: 'bedrock-2023-05-31',
+            max_tokens: 4000, 
+            temperature: 0.5, // Equilibrio entre creatividad y hechos
+            system: systemPrompt,
+            messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
+        })
+    };
+
+    try {
+        const command = new InvokeModelCommand(payload);
+        const response = await client.send(command);
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+        if (responseBody.content && responseBody.content.length > 0) {
+            let fullText = responseBody.content[0].text.trim();
+            
+            // Procesamos línea por línea
+            const lines = fullText.split('\n').filter(line => line.trim() !== '');
+            
+            if (lines.length < 4) {
+                console.warn("[Bedrock] La IA no respetó el formato estricto. Intentando recuperar...");
+                // Fallback básico
+                return { 
+                    categoria: "general", 
+                    tituloViral: title, 
+                    textoImagen: "URGENTE", 
+                    articuloGenerado: fullText 
+                };
+            }
+            
+            // 1. Extraer y LIMPIAR Categoría (¡AQUÍ ESTÁ LA MAGIA!)
+            let rawCat = lines[0];
+            let categoria = cleanCategory(rawCat); // Usamos la función lavadora
+
+            // 2. Extraer resto
+            let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
+            let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
+            if (textoImagen.length > 25) textoImagen = "ALERTA MÁXIMA";
+            
+            const articuloGenerado = lines.slice(3).join('\n').trim();
+
+            console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Imagen: "${textoImagen}"`);
+            
+            return {
+                categoriaSugerida: categoria, // (Mantengo nombre antiguo para compatibilidad si fuera necesario)
+                categoria: categoria,       // Nombre nuevo
+                tituloViral: tituloViral,
+                textoImagen: textoImagen,
+                articuloGenerado: articuloGenerado
+            };
+        }
+        return null;
+
+    } catch (error) {
+        console.error(`Error Bedrock News:`, error.message);
+        return null; 
     }
 };

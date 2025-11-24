@@ -1,26 +1,20 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN MAESTRA FINAL (RECOLECTOR + IA TEXTO + IA IMAGEN + VIDEO + TELEGRAM)! ---
+// --- ¡VERSIÓN MAESTRA FINAL: RECOLECCIÓN + TÍTULOS VIRALES + IMÁGENES ÉPICAS! ---
 
 const axios = require('axios');
 const Article = require('../models/article');
 const { publicarUnArticulo } = require('../utils/telegramBot');
 
-// 1. IMPORTAMOS LAS DOS FUNCIONES DE BEDROCK (TEXTO Y PROMPT VISUAL)
+// 1. IMPORTAMOS LAS FUNCIONES DE BEDROCK (TEXTO VIRAL Y PROMPT VISUAL)
 const { generateArticleContent, generateImagePrompt } = require('../utils/bedrockClient');
 
-// 2. IMPORTAMOS EL GENERADOR DE IMÁGENES (DEEPINFRA + SHARP + BUNNY)
+// 2. IMPORTAMOS EL GENERADOR DE MINIATURAS (DEEPINFRA + SHARP + BUNNY)
 const { generateNewsThumbnail } = require('../utils/imageHandler');
 
 // --- Configuración del Bot de Video ---
 const VIDEO_BOT_URL = process.env.VIDEO_BOT_URL;
-// Reusamos la misma ADMIN_API_KEY
+// Reusamos la misma ADMIN_API_KEY para autenticar
 const VIDEO_BOT_KEY = process.env.ADMIN_API_KEY; 
-
-// Tu lista de reporteros (para uso interno si se requiere ampliar lógica)
-const REPORTER_IMAGES = [
-    "reportera_maria.png",
-    "reportero_juan.png"
-];
 
 // --- Constantes (Listas de países y mapeo) ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
@@ -50,7 +44,7 @@ let isFetchWorkerRunning = false;
 let globalArticleQueue = []; // Aquí se guardan las noticias crudas esperando IA
 let articlesProcessedSinceLastTelegram = 0;
 
-// --- Sistema de Rotación de Claves (Recuperado completo) ---
+// --- Sistema de Rotación de Claves ---
 const gnewsKeys = [
     process.env.GNEWS_API_KEY,
     process.env.GNEWS_API_KEY_2,
@@ -70,12 +64,12 @@ let currentNewsDataKeyIndex = 0;
 
 
 // =========================================================================
-// PARTE 1: EL RECOLECTOR (Lógica Original Completa)
+// PARTE 1: EL RECOLECTOR (Lógica Completa de Búsqueda)
 // =========================================================================
 
 /**
- * [INTERNO / EXPORTADO] Esta es la función de trabajo pesado de RECOLECCIÓN.
- * Busca en NewsData y GNews, rota claves si fallan y llena la fila.
+ * [INTERNO / EXPORTADO] Función que busca noticias en las APIs externas
+ * y llena la fila 'globalArticleQueue'.
  */
 const runNewsAPIFetch = async () => {
     if (isFetchWorkerRunning) {
@@ -189,7 +183,7 @@ const runNewsAPIFetch = async () => {
         }
         console.log(`(Recolector) -> Total Obtenidos (GNews + NewsData): ${articulosCrudos.length}.`);
 
-        // --- C. DE-DUPLICACIÓN (Vital para no procesar repetidos) ---
+        // --- C. DE-DUPLICACIÓN ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
         
         // 1. Chequear contra la Base de Datos
@@ -225,13 +219,13 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 
 
 /**
- * [PRIVADO] Esta es la ruta API que puedes llamar manualmente para probar la recolección
+ * [PRIVADO] Ruta API para activar la recolección manualmente
  */
 exports.syncNewsAPIs = async (req, res) => {
     res.json({ 
         message: "¡Trabajo de RECOLECCIÓN (con rotación de claves) iniciado! Añadiendo noticias a la fila en segundo plano."
     });
-    // Fire and forget
+    // Fire and forget (ejecutar sin esperar)
     runNewsAPIFetch();
 };
 
@@ -262,11 +256,11 @@ async function _triggerVideoBot(article) {
         articleCheck.videoProcessingStatus = 'processing';
         await articleCheck.save();
 
-        // 2. Preparar payload. ¡OJO! Aquí enviamos la imagen (que puede ser la de BunnyCDN)
+        // 2. Preparar payload. Enviamos la URL de la imagen (Bunny o Original)
         const payload = {
             text: articleCheck.articuloGenerado, 
             title: articleCheck.titulo,            
-            image_url: articleCheck.imagen, // <--- Aquí va la URL (ya sea original o de Bunny)
+            image_url: articleCheck.imagen, // <--- Aquí va la URL de la imagen épica
             article_id: articleCheck._id 
         };
 
@@ -317,9 +311,6 @@ async function _triggerVideoBot(article) {
 // PARTE 3: PING GOOGLE SITEMAP (SEO)
 // =========================================================================
 
-/**
- * [INTERNO] Envía un "ping" a Google para indexar rápido
- */
 async function _pingGoogleSitemap() {
     const sitemapUrl = 'https://www.noticias.lat/sitemap.xml';
     const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
@@ -333,7 +324,7 @@ async function _pingGoogleSitemap() {
 
 
 // =========================================================================
-// PARTE 4: EL WORKER UNIFICADO (TEXTO + IMAGEN + VIDEO)
+// PARTE 4: EL WORKER UNIFICADO (IA + IMAGEN ÉPICA + VIDEO + TELEGRAM)
 // =========================================================================
 
 /**
@@ -344,7 +335,7 @@ exports.startNewsWorker = () => {
         console.log("[News Worker] Ya está corriendo.");
         return;
     }
-    console.log("[News Worker] Iniciando worker (IA Texto -> IA Imagen -> DB -> VideoBot -> Telegram)...");
+    console.log("[News Worker] Iniciando worker (IA Texto -> IA Imagen Épica -> DB -> VideoBot -> Telegram)...");
     isNewsWorkerRunning = true;
     _runNewsWorker(); 
 };
@@ -370,27 +361,32 @@ async function _runNewsWorker() {
             // -------------------------------------------------------------
             // PASO A: GENERAR CONTENIDO TEXTUAL (BEDROCK)
             // -------------------------------------------------------------
+            // Ahora 'generateArticleContent' devuelve un objeto con { categoria, tituloViral, textoImagen, articuloGenerado }
             const resultadoIA = await generateArticleContent(articleToProcess);
 
-            // Solo procedemos si hay texto generado
-            if (resultadoIA && resultadoIA.articuloGenerado && resultadoIA.categoriaSugerida) {
+            // Solo procedemos si hay texto generado y el objeto es válido
+            if (resultadoIA && resultadoIA.articuloGenerado && resultadoIA.categoria) {
+                
+                // Extraemos los datos especiales de la IA
+                const { categoria, tituloViral, textoImagen, articuloGenerado } = resultadoIA;
                 
                 // -------------------------------------------------------------
-                // PASO B: GENERAR IMAGEN PRO (DEEPINFRA + BUNNY)
+                // PASO B: GENERAR IMAGEN ÉPICA (DEEPINFRA + BUNNY)
                 // -------------------------------------------------------------
                 let finalImageUrl = articleToProcess.image; // Por defecto: la imagen original
                 
                 try {
                     console.log("[News Worker] 🎨 Paso de Imagen: Generando Prompt Visual...");
                     
-                    // B1. Pedir Prompt a Bedrock (basado en el texto generado)
-                    const imagePrompt = await generateImagePrompt(articleToProcess.title, resultadoIA.articuloGenerado);
+                    // B1. Pedimos Prompt a Bedrock (Usando el Título Viral para mejor contexto)
+                    const imagePrompt = await generateImagePrompt(tituloViral, articuloGenerado);
                     
                     if (imagePrompt) {
-                        console.log(`[News Worker] 🖼️ Prompt listo. Creando Miniatura con DeepInfra...`);
+                        console.log(`[News Worker] 🖼️ Prompt listo. Creando Miniatura Épica con texto: "${textoImagen}"...`);
                         
-                        // B2. Generar, Editar y Subir a Bunny
-                        const bunnyUrl = await generateNewsThumbnail(imagePrompt, articleToProcess.title);
+                        // B2. Generar, Editar (Texto 2-3 palabras) y Subir a Bunny
+                        // ¡AQUÍ USAMOS 'textoImagen' (Ej: "CAOS TOTAL") EN LUGAR DEL TÍTULO LARGO!
+                        const bunnyUrl = await generateNewsThumbnail(imagePrompt, textoImagen);
                         
                         if (bunnyUrl) {
                             console.log(`[News Worker] ✅ ¡Imagen Pro Creada!: ${bunnyUrl}`);
@@ -406,17 +402,18 @@ async function _runNewsWorker() {
                 // -------------------------------------------------------------
                 // PASO C: GUARDAR EN BASE DE DATOS
                 // -------------------------------------------------------------
+                // ¡IMPORTANTE! Guardamos con el 'tituloViral' generado por la IA, no el de GNews.
                 const newArticle = new Article({
-                    titulo: articleToProcess.title,
+                    titulo: tituloViral || articleToProcess.title, // Título Clickbait para la web
                     descripcion: articleToProcess.description,
-                    imagen: finalImageUrl, // La de Bunny o la original
+                    imagen: finalImageUrl, // La de Bunny (Épica) o la original
                     sitio: 'noticias.lat',
-                    categoria: resultadoIA.categoriaSugerida,
+                    categoria: categoria,
                     pais: articleToProcess.paisLocal,
                     fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt),
-                    articuloGenerado: resultadoIA.articuloGenerado,
+                    articuloGenerado: articuloGenerado,
                     telegramPosted: false,
                     videoProcessingStatus: 'pending' // Estado inicial para el bot de video
                 });
@@ -475,7 +472,7 @@ async function _runNewsWorker() {
 
 /**
  * [PRIVADO] Añadir un nuevo artículo manualmente.
- * TAMBIÉN intenta generar la imagen si no se provee una.
+ * TAMBIÉN intenta generar la imagen y títulos virales si no se proveen.
  */
 exports.createManualArticle = async (req, res) => {
     try {
@@ -485,33 +482,36 @@ exports.createManualArticle = async (req, res) => {
              return res.status(400).json({ error: "El 'enlaceOriginal' (URL) es obligatorio." });
         }
         
-        // 1. Generar Texto IA
-        const resultadoIA = await generateArticleContent({ url: enlaceOriginal, title: titulo });
+        // 1. Generar Texto IA (y Títulos Virales)
+        const iaData = await generateArticleContent({ url: enlaceOriginal, title: titulo || "Noticia Manual" });
 
-        if (!resultadoIA) {
+        if (!iaData) {
             return res.status(500).json({ error: "Bedrock no pudo procesar la URL." });
         }
 
-        // 2. Generar Imagen IA (Si el usuario no subió una propia o quiere forzarla)
+        const { categoria, tituloViral, textoImagen, articuloGenerado } = iaData;
+
+        // 2. Generar Imagen IA (Si el usuario no subió una propia)
         let finalImageUrl = imagen; 
         
-        // Si no mandas imagen, o quieres que el sistema la haga, aquí entra la magia:
         if (!finalImageUrl) {
             console.log("[Manual] Usuario no proveyó imagen. Generando con IA...");
             try {
-                const prompt = await generateImagePrompt(titulo, resultadoIA.articuloGenerado);
-                const bunnyUrl = await generateNewsThumbnail(prompt, titulo);
+                // Generar Prompt Visual
+                const prompt = await generateImagePrompt(tituloViral, articuloGenerado);
+                // Generar Imagen Épica (con texto corto)
+                const bunnyUrl = await generateNewsThumbnail(prompt, textoImagen);
+                
                 if (bunnyUrl) {
                     finalImageUrl = bunnyUrl;
                 }
             } catch (e) {
                 console.error("Error generando imagen manual:", e.message);
-                // Si falla, se quedará como null (o podrías poner una placeholder)
             }
         }
 
         const newArticle = new Article({
-            titulo: titulo || 'Título Generado',
+            titulo: titulo || tituloViral, // Preferimos el título manual si existe, sino el viral
             descripcion: descripcion || 'Descripción Generada',
             imagen: finalImageUrl,
             sitio: sitio || 'noticias.lat',
@@ -519,8 +519,8 @@ exports.createManualArticle = async (req, res) => {
             enlaceOriginal: enlaceOriginal,
             fecha: fecha ? new Date(fecha) : new Date(),
             pais: pais || null,
-            articuloGenerado: resultadoIA.articuloGenerado,
-            categoria: resultadoIA.categoriaSugerida,
+            articuloGenerado: articuloGenerado,
+            categoria: categoria,
             telegramPosted: false,
             videoProcessingStatus: 'pending'
         });
