@@ -151,7 +151,7 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
             <rect x="0" y="${IMG_HEIGHT - 15}" width="${IMG_WIDTH}" height="15" class="footer-bar" />
             
             <text x="50%" y="${IMG_HEIGHT - 40}" class="source-text" filter="url(#dropShadow)">
-                Fuente: www.noticias.lat
+                www.noticias.lat
             </text>
         </svg>
         `;
