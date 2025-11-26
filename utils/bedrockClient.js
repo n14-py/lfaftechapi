@@ -138,7 +138,7 @@ exports.generateImagePrompt = async (title, content) => {
     // Usamos un fragmento del contenido para dar contexto
     const textContext = content.length > 500 ? content.substring(0, 1500) : title;
 
-    const systemPrompt = `You are an expert AI Art Director for a News Channel. 
+    const systemPrompt = `You are an expert AI Art Director for a serious News Channel (like BBC or CNN). 
 Your task is to write a single, highly descriptive prompt in English for an image generator (SDXL).
 
 --- SAFETY & CENSORSHIP RULES ---
@@ -146,10 +146,10 @@ Your task is to write a single, highly descriptive prompt in English for an imag
 2. **REAL PEOPLE:** If the news mentions a famous person (e.g., Trump, Messi, Shakira), **USE THEIR FULL NAME** in the prompt so the AI generates their likeness.
 
 --- STYLE GUIDELINES ---
-- The image must be **PHOTOREALISTIC** and **DRAMATIC**.
+- The image must be **PHOTOREALISTIC**, **OBJECTIVE** and **DRAMATIC**.
 - NO TEXT in the image description (we will add text later).
 - Focus on the **Subject** and the **Lighting**.
-- Keywords to always include: "8k, masterpiece, trending on artstation, cinematic lighting, hyperrealistic, shallow depth of field, bokeh background".
+- Keywords to always include: "8k, masterpiece, press photography, cinematic lighting, hyperrealistic, shallow depth of field, bokeh background".
 
 --- OUTPUT FORMAT ---
 Just the prompt string in English. Nothing else.`;
@@ -197,7 +197,7 @@ Context: "${textContext}..."`;
 
 
 // ============================================================================
-// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS VIRALES (TEXTO + DATOS EXTRA)
+// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS (TEXTO + DATOS EXTRA)
 // ============================================================================
 
 exports.generateArticleContent = async (article) => {
@@ -219,25 +219,27 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA (Completa con tu conocimiento general):\nTítulo: "${title}"\nDescripción: "${description || 'Sin descripción'}"\nPaís: "${paisLocal || 'Internacional'}"`;
     }
 
-    // --- SYSTEM PROMPT MAESTRO (ESTRUCTURA ESTRICTA) ---
-const systemPrompt = `Eres el Editor Jefe de un medio serio como 'CNN' o 'BBC'. Tu misión es crear contenido profesional y veraz.
+    // --- SYSTEM PROMPT MAESTRO (PROFESIONAL / NO-SENSACIONALISTA) ---
+    const systemPrompt = `Eres el Editor Jefe de un medio internacional serio y profesional (estilo BBC, CNN o Reuters).
+Tu misión es informar con VERACIDAD y OBJETIVIDAD. 
 
 TU TAREA: Analiza la fuente y genera una respuesta con una ESTRUCTURA ESTRICTA de 4 partes.
 
 --- ESTRUCTURA DE SALIDA OBLIGATORIA ---
 LÍNEA 1: [CATEGORÍA] (Una sola palabra: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2: TÍTULO VIRAL: [Un título atractivo para web, aprox 10 palabras].
-LÍNEA 3: TEXTO IMAGEN: [RESUMEN INFORMATIVO CORTO (3-5 palabras). NO USES CLICKBAIT GENÉRICO.
-    - MAL: "CAOS TOTAL", "MIRA ESTO", "INCREÍBLE".
-    - BIEN: "Shakira en Paraguay", "Trump amenaza a Maduro", "Accidente en Buenos Aires".
-    - REGLA: Debe decir SIEMPRE el Sujeto y la Ubicación/Acción].
-LÍNEA 4 en adelante: [CUERPO DE LA NOTICIA] (Mínimo 500 palabras).
-
+LÍNEA 2: TÍTULO VIRAL: [Un título atractivo para web, aprox 8-12 palabras, interesante pero sin mentir].
+LÍNEA 3: TEXTO IMAGEN: [RESUMEN INFORMATIVO CORTO (3 a 5 palabras). 
+    - OBJETIVO: Describir QUÉ pasa y DÓNDE/QUIÉN.
+    - PROHIBIDO: Palabras genéricas como "CAOS TOTAL", "ALERTA", "ÚLTIMO MOMENTO", "MIRA ESTO".
+    - FORMATO CORRECTO: "Sujeto + Verbo/Lugar".
+    - EJEMPLOS BIEN: "Shakira en Paraguay", "Trump amenaza a Maduro", "Sismo en México", "Boca gana a River".
+    - EJEMPLOS MAL: "Terrible Noticia", "No creerás esto", "Final Inesperado"].
+LÍNEA 4 en adelante: [CUERPO DE LA NOTICIA] (Mínimo 500 palabras. Usa un tono periodístico formal, párrafos cortos, estructura clara).
 
 --- REGLAS DE REDACCIÓN ---
-1. Si la noticia es trágica, sé respetuoso pero dramático.
+1. Sé objetivo. Evita adjetivos exagerados (increíble, espantoso, milagroso).
 2. NO inventes cifras ni fechas que no estén en la fuente.
-3. Usa párrafos cortos y atrapantes.
+3. El "TEXTO IMAGEN" es lo más importante: debe ser el titular resumido.
 `;
 
     const userPrompt = `Procesa esta noticia: ${url}
@@ -251,7 +253,7 @@ ${promptContexto}`;
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
             max_tokens: 4000, 
-            temperature: 0.5, // Equilibrio entre creatividad y hechos
+            temperature: 0.4, // Temperatura baja para ser más preciso y serio
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
@@ -274,27 +276,32 @@ ${promptContexto}`;
                 return { 
                     categoria: "general", 
                     tituloViral: title, 
-                    textoImagen: "URGENTE", 
+                    textoImagen: title.substring(0, 20), // Usamos el título real cortado en vez de "URGENTE"
                     articuloGenerado: fullText 
                 };
             }
             
-            // 1. Extraer y LIMPIAR Categoría (¡AQUÍ ESTÁ LA MAGIA!)
+            // 1. Extraer y LIMPIAR Categoría
             let rawCat = lines[0];
-            let categoria = cleanCategory(rawCat); // Usamos la función lavadora
+            let categoria = cleanCategory(rawCat);
 
             // 2. Extraer resto
             let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
             let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
-            if (textoImagen.length > 25) textoImagen = "ALERTA MÁXIMA";
+            
+            // Limpieza de seguridad por si la IA falla y pone algo muy largo
+            if (textoImagen.length > 40) {
+                 // Si es muy largo, tomamos las primeras 4 palabras del título viral
+                 textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
+            }
             
             const articuloGenerado = lines.slice(3).join('\n').trim();
 
             console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Imagen: "${textoImagen}"`);
             
             return {
-                categoriaSugerida: categoria, // (Mantengo nombre antiguo para compatibilidad si fuera necesario)
-                categoria: categoria,       // Nombre nuevo
+                categoriaSugerida: categoria, 
+                categoria: categoria,       
                 tituloViral: tituloViral,
                 textoImagen: textoImagen,
                 articuloGenerado: articuloGenerado
