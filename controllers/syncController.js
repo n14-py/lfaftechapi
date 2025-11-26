@@ -343,123 +343,84 @@ exports.startNewsWorker = () => {
 /**
  * [INTERNO] El bucle infinito que procesa la fila
  */
+/**
+ * [INTERNO] El bucle infinito que procesa la fila
+ */
 async function _runNewsWorker() {
     while (isNewsWorkerRunning) {
         let articleToProcess = null;
         try {
             // 1. ¿Hay trabajo?
             if (globalArticleQueue.length === 0) {
-                await sleep(1 * 60 * 1000); // Esperar 1 minuto si está vacío
+                await sleep(1 * 60 * 1000); 
                 continue; 
             }
 
-            // 2. Tomar noticia de la fila
             articleToProcess = globalArticleQueue.shift(); 
-            
-            console.log(`[News Worker] Fila restante: ${globalArticleQueue.length}. Procesando: ${articleToProcess.title}`);
+            console.log(`[News Worker] Procesando: ${articleToProcess.title} (País: ${articleToProcess.paisLocal})`);
 
-            // -------------------------------------------------------------
-            // PASO A: GENERAR CONTENIDO TEXTUAL (BEDROCK)
-            // -------------------------------------------------------------
-            // Ahora 'generateArticleContent' devuelve un objeto con { categoria, tituloViral, textoImagen, articuloGenerado }
+            // PASO A: IA DE TEXTO
             const resultadoIA = await generateArticleContent(articleToProcess);
 
-            // Solo procedemos si hay texto generado y el objeto es válido
             if (resultadoIA && resultadoIA.articuloGenerado && resultadoIA.categoria) {
-                
-                // Extraemos los datos especiales de la IA
                 const { categoria, tituloViral, textoImagen, articuloGenerado } = resultadoIA;
                 
-                // -------------------------------------------------------------
-                // PASO B: GENERAR IMAGEN ÉPICA (DEEPINFRA + BUNNY)
-                // -------------------------------------------------------------
-                let finalImageUrl = articleToProcess.image; // Por defecto: la imagen original
+                // PASO B: IA DE IMAGEN (¡CON PAÍS FORZADO!)
+                let finalImageUrl = articleToProcess.image; 
                 
                 try {
-                    console.log("[News Worker] 🎨 Paso de Imagen: Generando Prompt Visual...");
-                    
-                    // B1. Pedimos Prompt a Bedrock (Usando el Título Viral para mejor contexto)
+                    // 1. Prompt Visual
                     const imagePrompt = await generateImagePrompt(tituloViral, articuloGenerado);
                     
                     if (imagePrompt) {
-                        console.log(`[News Worker] 🖼️ Prompt listo. Creando Miniatura Épica con texto: "${textoImagen}"...`);
-                        
-                        // B2. Generar, Editar (Texto 2-3 palabras) y Subir a Bunny
-                        // ¡AQUÍ USAMOS 'textoImagen' (Ej: "CAOS TOTAL") EN LUGAR DEL TÍTULO LARGO!
-                        const bunnyUrl = await generateNewsThumbnail(imagePrompt, textoImagen);
+                        // 2. Generar Imagen (Pasamos textoImagen Y el PAÍS LOCAL)
+                        // ¡AQUÍ ESTÁ EL CAMBIO CLAVE!: articleToProcess.paisLocal
+                        const bunnyUrl = await generateNewsThumbnail(imagePrompt, textoImagen, articleToProcess.paisLocal);
                         
                         if (bunnyUrl) {
-                            console.log(`[News Worker] ✅ ¡Imagen Pro Creada!: ${bunnyUrl}`);
-                            finalImageUrl = bunnyUrl; // ¡Reemplazamos la imagen original!
-                        } else {
-                            console.warn("[News Worker] Falló DeepInfra/Bunny. Usando imagen original como fallback.");
+                            finalImageUrl = bunnyUrl;
                         }
                     }
                 } catch (imgError) {
-                    console.error(`[News Worker] Error en flujo de imagen (no crítico): ${imgError.message}`);
+                    console.error(`[News Worker] Error imagen: ${imgError.message}`);
                 }
                 
-                // -------------------------------------------------------------
-                // PASO C: GUARDAR EN BASE DE DATOS
-                // -------------------------------------------------------------
-                // ¡IMPORTANTE! Guardamos con el 'tituloViral' generado por la IA, no el de GNews.
+                // PASO C: GUARDAR
                 const newArticle = new Article({
-                    titulo: tituloViral || articleToProcess.title, // Título Clickbait para la web
+                    titulo: tituloViral || articleToProcess.title, 
                     descripcion: articleToProcess.description,
-                    imagen: finalImageUrl, // La de Bunny (Épica) o la original
+                    imagen: finalImageUrl,
                     sitio: 'noticias.lat',
                     categoria: categoria,
-                    pais: articleToProcess.paisLocal,
+                    pais: articleToProcess.paisLocal, // Guardamos el país original
                     fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt),
                     articuloGenerado: articuloGenerado,
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending' // Estado inicial para el bot de video
+                    videoProcessingStatus: 'pending'
                 });
                 
                 await newArticle.save();
-                console.log(`[News Worker] ¡Artículo guardado en DB! (${newArticle.titulo})`);
+                console.log(`[News Worker] Guardado: ${newArticle.titulo}`);
 
-                // -------------------------------------------------------------
-                // PASO D: DISPARAR BOT DE VIDEO
-                // -------------------------------------------------------------
-                // Sin await, para que el worker siga con la siguiente noticia
                 _triggerVideoBot(newArticle);
 
-                // -------------------------------------------------------------
-                // PASO E: TELEGRAM Y GOOGLE (Cada 11 noticias)
-                // -------------------------------------------------------------
                 articlesProcessedSinceLastTelegram++;
-                
                 if (articlesProcessedSinceLastTelegram >= 11) {
-                    console.log(`[News Worker] ¡Lote de 11! Enviando notificación a Telegram y Google...`);
-                    
-                    // Telegram
                     await publicarUnArticulo(newArticle); 
-                    // Google
                     await _pingGoogleSitemap();
-
                     articlesProcessedSinceLastTelegram = 0; 
-                } else {
-                    console.log(`[News Worker] Contador Telegram: ${articlesProcessedSinceLastTelegram}/11.`);
                 }
                 
             } else {
-                console.warn(`[News Worker] Fallo de IA Texto para ${articleToProcess.title}. Descartado.`);
+                console.warn(`[News Worker] Fallo IA Texto.`);
             }
             
-            // Pausa de seguridad (30 seg)
-            console.log("[News Worker] Pausa de 30 segundos...");
             await sleep(30 * 1000); 
 
         } catch (error) {
-            if (error.code === 11000) {
-                 console.warn(`[News Worker] Duplicado detectado al guardar. Saltando.`);
-            } else {
-                console.error(`[News Worker] Error fatal procesando ${articleToProcess?.title}: ${error.message}`);
-            }
-            // En caso de error grave, pausa de 1 min
+            console.error(`[News Worker] Error: ${error.message}`);
             await sleep(1 * 60 * 1000);
         }
     }

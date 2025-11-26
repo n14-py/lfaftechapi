@@ -58,22 +58,36 @@ function cleanCategory(rawCategory) {
 async function fetchUrlContent(url) {
     try {
         const { data } = await axios.get(url, { 
-            timeout: 8000, // Aumentamos un poco el tiempo de espera por si la web es lenta
+            timeout: 10000, // 10 segundos timeout
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
         });
         
         const $ = cheerio.load(data);
-        $('script, style, nav, footer, header, iframe, .ads').remove();
+        $('script, style, nav, footer, header, iframe, .ads, .menu, .sidebar').remove();
 
-        let text = '';
-        $('p').each((i, el) => {
-            text += $(el).text() + '\n\n'; // Doble salto de línea para separar párrafos claramente
-        });
+        // Intentar buscar contenedores de artículos comunes para no leer basura del footer
+        let content = '';
+        const selectors = ['article', '.entry-content', '.post-content', '.article-body', 'main', 'body'];
+        
+        for (const sel of selectors) {
+            if ($(sel).length > 0) {
+                // Extraer párrafos de ese contenedor
+                $(sel).find('p').each((i, el) => {
+                    const text = $(el).text().trim();
+                    if (text.length > 20) content += text + '\n\n';
+                });
+                if (content.length > 500) break; // Si encontramos buen contenido, paramos
+            }
+        }
+        
+        // Si fallaron los selectores, leer todos los P
+        if (content.length < 200) {
+             $('p').each((i, el) => { content += $(el).text().trim() + '\n\n'; });
+        }
 
-        // Aumentamos el límite de lectura a 25000 caracteres para no cortar noticias largas
-        return text.trim().substring(0, 25000); 
+        return content.trim().substring(0, 30000); // Leemos hasta 30k caracteres
     } catch (error) {
-        console.warn(`[BedrockClient] No se pudo leer contenido de ${url}: ${error.message}`);
+        console.warn(`[BedrockClient] Error leyendo URL: ${error.message}`);
         return null; 
     }
 }
@@ -189,52 +203,39 @@ Context: "${textContext}..."`;
 exports.generateArticleContent = async (article) => {
     const { url, title, description, paisLocal } = article; 
 
-    if (!url || !url.startsWith('http')) {
-        console.error(`Error: URL inválida para "${title}".`);
-        return null;
-    }
+    if (!url || !url.startsWith('http')) return null;
 
-    console.log(`[BedrockClient] Leyendo URL: ${url}...`);
+    console.log(`[BedrockClient] Leyendo URL a fondo: ${url}...`);
     const contenidoReal = await fetchUrlContent(url);
 
     let promptContexto = "";
-    if (contenidoReal && contenidoReal.length > 300) {
-        promptContexto = `FUENTE REAL (Texto completo del artículo original):\n--- INICIO ---\n${contenidoReal}\n--- FIN ---`;
+    if (contenidoReal && contenidoReal.length > 600) {
+        promptContexto = `CONTENIDO FUENTE COMPLETO:\n--- INICIO ---\n${contenidoReal}\n--- FIN ---`;
     } else {
-        promptContexto = `FUENTE LIMITADA (Completa con contexto inteligente):\nTítulo: "${title}"\nDescripción: "${description || 'Sin descripción'}"\nPaís: "${paisLocal || 'Internacional'}"`;
+        // Si la fuente es muy corta, avisamos a la IA para que investigue/contextualice
+        promptContexto = `FUENTE LIMITADA (El scraper no pudo leer todo): Título: "${title}". Descripción: "${description}".`;
     }
 
-    // --- SYSTEM PROMPT MAESTRO (VERSIÓN LARGA Y DETALLADA) ---
-    // --- SYSTEM PROMPT MAESTRO (AQUÍ ESTÁ LA MAGIA) ---
-    const systemPrompt = `Eres el Editor Jefe de un diario internacional de alto nivel.
-TU OBJETIVO PRINCIPAL: Leer TODO el contenido fuente y generar titulares PRECISOS y artículos COMPLETOS.
+    // --- PROMPT AGRESIVO PARA LONGITUD ---
+    const systemPrompt = `Eres un Periodista Senior de Investigación. Tu trabajo NO es resumir, sino EXPANDIR y PROFUNDIZAR.
 
---- INSTRUCCIONES PARA "TEXTO IMAGEN" (CRUCIAL) ---
-Este texto va en la portada. Si fallas aquí, la noticia no sirve.
-1. **LEE LA NOTICIA ENTERA** para entender de qué se trata realmente.
-2. **PROHIBIDO:** - NO uses frases incompletas que terminen en "de", "el", "sobre", "que".
-   - NO escribas "Experto habla sobre...", "Lo que se sabe de...", "Increíble suceso".
-   - NO uses clickbait barato.
-3. **OBLIGATORIO - LA FÓRMULA DE 3 A 6 PALABRAS:**
-   - Debe ser [SUJETO] + [ACCIÓN/LUGAR].
-   - Debe tener sentido por sí mismo.
-   - EJEMPLOS CORRECTOS: "Shakira Llega a Paraguay", "Trump Amenaza a Maduro", "Caída del Dólar en Argentina", "Putin Advierte a la OTAN".
-   - EJEMPLO INCORRECTO: "El presidente dijo que", "Situación en la frontera de".
+OBJETIVO: Redactar un artículo DETALLADO y LARGO (Mínimo 800 - 1200 palabras si la fuente lo permite).
 
---- INSTRUCCIONES DE REDACCIÓN (IMPORTANTE) ---
-1. **ADAPTABILIDAD:** Si la fuente original es EXTENSA y detallada, tu artículo DEBE SER LARGO. No resumas; mantén todos los detalles y profundidad.
-2. Si la fuente es CORTA, escribe algo conciso pero agrega contexto (antecedentes reales) para que se entienda mejor. NO inventes hechos.
-3. Escribe con tus propias palabras (parafraseo profesional).
+--- REGLAS DE ORO ---
+1. **LONGITUD:** Prohibido hacer artículos cortos. Si la fuente es breve, agrega contexto histórico, antecedentes políticos o económicos, y explica las implicaciones. ¡Escribe mucho!
+2. **ESTILO:** Usa un tono formal, periodístico y atrapante. Estructura con Introducción fuerte, Desarrollo profundo y Conclusión.
+3. **TITULARES:** - Título Viral: Atractivo pero serio (aprox 10 palabras).
+   - Texto Imagen: SOLO 3 a 6 palabras clave. Ej: "Sube el Dólar en Argentina". NUNCA uses "Experto opina sobre".
+4. **VERACIDAD:** No inventes datos falsos, pero sí puedes usar tu conocimiento general para explicar conceptos complejos mencionados en la noticia.
 
---- ESTRUCTURA DE SALIDA (NO ROMPER) ---
-LÍNEA 1: [CATEGORÍA] (Una sola palabra: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2: TÍTULO VIRAL: [Título web completo, 8-13 palabras, basado en el contenido real].
-LÍNEA 3: TEXTO IMAGEN: [Tu mejor titular corto de 3-6 palabras. REVISA QUE NO TERMINE EN PREPOSICIÓN].
-LÍNEA 4 en adelante: [CUERPO DEL ARTÍCULO]
+--- ESTRUCTURA DE SALIDA ---
+LÍNEA 1: [CATEGORÍA] (politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
+LÍNEA 2: TÍTULO VIRAL: [Título largo aquí]
+LÍNEA 3: TEXTO IMAGEN: [Título corto aquí]
+LÍNEA 4 en adelante: [CUERPO DEL ARTÍCULO EXTENSO]
 `;
 
-    const userPrompt = `Procesa esta noticia para su publicación: ${url}
-    
+    const userPrompt = `Analiza esta fuente y escribe el artículo COMPLETO:
 ${promptContexto}`;
 
     const payload = {
@@ -243,13 +244,14 @@ ${promptContexto}`;
         accept: 'application/json',
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 4000, 
-            temperature: 0.5, // Subimos un poco la temperatura para que parafrasee mejor y escriba más fluido
+            max_tokens: 6000, // AUMENTADO DE 4000 A 6000
+            temperature: 0.6, // UN POCO MÁS CREATIVO PARA QUE ESCRIBA MÁS
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
     };
 
+    // ... (El resto del código de try/catch es igual, solo cambia el prompt y max_tokens)
     try {
         const command = new InvokeModelCommand(payload);
         const response = await client.send(command);
@@ -259,41 +261,22 @@ ${promptContexto}`;
             let fullText = responseBody.content[0].text.trim();
             const lines = fullText.split('\n').filter(line => line.trim() !== '');
             
-            if (lines.length < 4) {
-                console.warn("[Bedrock] Fallo de formato. Recuperando...");
-                return { 
-                    categoria: "general", 
-                    tituloViral: title, 
-                    textoImagen: title.substring(0, 20),
-                    articuloGenerado: fullText 
-                };
-            }
+            if (lines.length < 4) return { categoria: "general", tituloViral: title, textoImagen: "NOTICIA DEL DÍA", articuloGenerado: fullText };
             
             let rawCat = lines[0];
             let categoria = cleanCategory(rawCat);
             let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
             let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
             
-            if (textoImagen.length > 40) {
-                 textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
-            }
+            if (textoImagen.length > 45) textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
             
             const articuloGenerado = lines.slice(3).join('\n').trim();
-
-            console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Longitud: ${articuloGenerado.length} chars`);
             
-            return {
-                categoriaSugerida: categoria, 
-                categoria: categoria,       
-                tituloViral: tituloViral,
-                textoImagen: textoImagen,
-                articuloGenerado: articuloGenerado
-            };
+            return { categoria, tituloViral, textoImagen, articuloGenerado };
         }
         return null;
-
     } catch (error) {
-        console.error(`Error Bedrock News:`, error.message);
+        console.error(`Error Bedrock:`, error.message);
         return null; 
     }
 };

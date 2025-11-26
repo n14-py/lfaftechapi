@@ -13,7 +13,7 @@ const IMG_WIDTH = 1280;
 const IMG_HEIGHT = 720;
 
 // =============================================================================
-// 🌎 DICCIONARIO DE CÓDIGOS ISO (Para descargar la bandera real)
+// 🌎 DICCIONARIO DE CÓDIGOS ISO (Para respaldo si no viene código)
 // =============================================================================
 const FLAG_CODES = {
     "paraguay": "py", "py": "py", "asunción": "py",
@@ -40,17 +40,15 @@ const FLAG_CODES = {
     "ucrania": "ua", "zelensky": "ua",
     "china": "cn", "xi jinping": "cn",
     "israel": "il", "gaza": "ps", "palestina": "ps",
-    "mundo": "un", "internacional": "un" // 'un' es la bandera de la ONU
+    "mundo": "un", "internacional": "un"
 };
 
 /**
- * Busca el código ISO (ej: 'py', 'ar') basado en el título
+ * Busca el código ISO basado en texto (SOLO SE USA COMO RESPALDO)
  */
-function getFlagCode(text) {
-    if (!text) return "un"; // Por defecto mundo/ONU
+function getFlagCodeFromText(text) {
+    if (!text) return "un"; 
     const lowerText = text.toLowerCase();
-    
-    // Buscar coincidencia en el mapa
     for (const [key, code] of Object.entries(FLAG_CODES)) {
         if (lowerText.includes(key)) return code;
     }
@@ -61,42 +59,55 @@ function getFlagCode(text) {
 // 🚀 FUNCIÓN PRINCIPAL
 // =============================================================================
 
-exports.generateNewsThumbnail = async (prompt, textOverlay) => {
+// AHORA RECIBE 'forcedCountryCode' (El país real de la base de datos)
+exports.generateNewsThumbnail = async (prompt, textOverlay, forcedCountryCode) => {
     try {
-        if (!DEEPINFRA_API_KEY || !BUNNY_STORAGE_KEY) return null;
+        if (!DEEPINFRA_API_KEY || !BUNNY_STORAGE_KEY) {
+            console.error("❌ ERROR: Faltan claves en .env");
+            return null;
+        }
 
-        // 1. Limpieza
+        // 1. Limpieza y Preparación del Texto
         const cleanTitle = (textOverlay || "").replace(/["']/g, "").toUpperCase().trim();
-        const flagCode = getFlagCode(cleanTitle); // Tu función existente
+        
+        // LÓGICA DE BANDERA DEFINITIVA:
+        // Si nos mandan el código (ej: 'py'), usamos ese. Si no, adivinamos por texto.
+        let flagCode = forcedCountryCode ? forcedCountryCode.toLowerCase() : getFlagCodeFromText(cleanTitle);
+        
+        // Corrección: 'do' (Dominicana) a veces da problemas si se confunde, aseguramos que sea string
+        if (flagCode === 'unknown') flagCode = null;
 
-        // 2. Imagen Base (DeepInfra)
+        console.log(`[ImageHandler] Generando para: "${cleanTitle}" | País forzado: ${forcedCountryCode} -> Flag: ${flagCode}`);
+
+        // 2. GENERAR IMAGEN BASE (DeepInfra - SDXL Turbo)
         const deepInfraRes = await axios.post(
             'https://api.deepinfra.com/v1/inference/stabilityai/sdxl-turbo',
             {
                 prompt: prompt + ", photorealistic, journalism style, 8k, news footage, bokeh background",
                 width: IMG_WIDTH,
                 height: IMG_HEIGHT,
-                num_inference_steps: 4
+                num_inference_steps: 4 
             },
             { headers: { 'Authorization': `Bearer ${DEEPINFRA_API_KEY}` } }
         );
-        
+
         if (!deepInfraRes.data?.images?.[0]) throw new Error("Fallo DeepInfra");
         const imageBuffer = Buffer.from(deepInfraRes.data.images[0].split(',')[1], 'base64');
 
-        // 3. DISEÑO MEJORADO (SVG)
-        
-        // Lógica de líneas (igual que antes)
+
+        // 3. PREPARAR DISEÑO SVG (Estilo CNN/BBC)
         const words = cleanTitle.split(' ');
         let line1 = cleanTitle;
         let line2 = "";
+
+        // Cortar texto si es largo
         if (words.length > 4 || cleanTitle.length > 25) {
             const mid = Math.ceil(words.length / 2);
             line1 = words.slice(0, mid).join(' ');
             line2 = words.slice(mid).join(' ');
         }
 
-        // Ajuste vertical para centrar visualmente el texto
+        // Posición vertical del texto (centrado)
         const textY = line2 ? "45%" : "50%"; 
 
         const svgOverlay = `
@@ -105,18 +116,12 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
                 <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
                     <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
                     <feOffset dx="3" dy="3" result="offsetblur" />
-                    <feComponentTransfer>
-                        <feFuncA type="linear" slope="0.7"/>
-                    </feComponentTransfer>
-                    <feMerge> 
-                        <feMergeNode />
-                        <feMergeNode in="SourceGraphic" /> 
-                    </feMerge>
+                    <feComponentTransfer><feFuncA type="linear" slope="0.8"/></feComponentTransfer>
+                    <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>
                 </filter>
-                
                 <radialGradient id="vignette">
                     <stop offset="60%" stop-color="black" stop-opacity="0" />
-                    <stop offset="100%" stop-color="black" stop-opacity="0.8" />
+                    <stop offset="100%" stop-color="black" stop-opacity="0.9" />
                 </radialGradient>
             </defs>
             
@@ -129,57 +134,59 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
                     font-weight: 900; 
                     font-size: 90px; 
                     text-anchor: middle;
-                    letter-spacing: -2px; /* Letras más pegadas (Estilo Impact) */
-                }
-                .footer-bar {
-                    fill: #e91e63; /* Color corporativo (puedes cambiarlo a azul #007bff) */
+                    letter-spacing: -2px;
                 }
                 .source-text {
                     fill: white;
                     font-family: "Arial", sans-serif;
                     font-weight: bold;
-                    font-size: 24px;
+                    font-size: 22px;
                     text-anchor: middle;
+                    opacity: 0.9;
                 }
+                .footer-line { fill: #e91e63; } 
             </style>
             
             <text x="50%" y="${textY}" class="title" filter="url(#dropShadow)">
                 <tspan x="50%" dy="0">${line1}</tspan>
-                ${line2 ? `<tspan x="50%" dy="100">${line2}</tspan>` : ''}
+                ${line2 ? `<tspan x="50%" dy="105">${line2}</tspan>` : ''}
             </text>
 
-            <rect x="0" y="${IMG_HEIGHT - 15}" width="${IMG_WIDTH}" height="15" class="footer-bar" />
+            <rect x="0" y="${IMG_HEIGHT - 12}" width="${IMG_WIDTH}" height="12" class="footer-line" />
             
             <text x="50%" y="${IMG_HEIGHT - 40}" class="source-text" filter="url(#dropShadow)">
-                www.noticias.lat
+                Fuente: www.noticias.lat
             </text>
         </svg>
         `;
 
-        // 4. COMPOSICIÓN
+        // 4. COMPOSICIÓN FINAL (Capas)
         const compositeLayers = [
-            // Capa Oscura General (más suave ahora que tenemos vignette y sombra)
+            // Fondo oscuro suave
             { input: Buffer.from(`<svg><rect width="${IMG_WIDTH}" height="${IMG_HEIGHT}" fill="black" opacity="0.3"/></svg>`), blend: 'over' },
-            // El SVG con texto y efectos
+            // Texto
             { input: Buffer.from(svgOverlay), blend: 'over' }
         ];
 
-        // 5. BANDERA (Ahora como "Insignia" en la esquina superior derecha)
-        if (flagCode) {
+        // 5. AGREGAR BANDERA (Si hay código válido)
+        if (flagCode && flagCode.length === 2) {
             try {
-                const flagUrl = `https://flagcdn.com/w160/${flagCode}.png`; // Usamos w160 para mejor calidad
+                // Descargar bandera de FlagCDN
+                const flagUrl = `https://flagcdn.com/w160/${flagCode}.png`; 
                 const flagBuffer = await axios.get(flagUrl, { responseType: 'arraybuffer' }).then(r => r.data);
                 
                 compositeLayers.push({
                     input: flagBuffer,
-                    top: 40,  // Margen superior
-                    left: IMG_WIDTH - 180, // Margen derecho
-                    // Opcional: Podrías redondear las esquinas de la bandera con otro svg mask, pero así cuadrada queda estilo "noticiero"
+                    // Posición: Esquina superior derecha (Estilo TV)
+                    top: 40,
+                    left: IMG_WIDTH - 190, 
                 });
-            } catch (err) { /* Ignorar error de bandera */ }
+            } catch (err) {
+                console.warn(`[ImageHandler] No se pudo cargar bandera para ${flagCode}`);
+            }
         }
 
-        // 6. PROCESAR CON SHARP
+        // 6. RENDERIZAR
         const finalImageBuffer = await sharp(imageBuffer)
             .resize(IMG_WIDTH, IMG_HEIGHT)
             .blur(5) // Blur suave
@@ -187,12 +194,18 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
             .toFormat('jpg')
             .toBuffer();
 
-        // 7. SUBIR (Igual que antes)
-        const filename = `news-pro-v2-${uuidv4()}.jpg`;
+        // 7. SUBIR
+        const filename = `news-final-${uuidv4()}.jpg`;
         const uploadUrl = `https://ny.storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filename}`;
-        await axios.put(uploadUrl, finalImageBuffer, { headers: { 'AccessKey': BUNNY_STORAGE_KEY, 'Content-Type': 'image/jpeg' } });
 
-        return `${BUNNY_CDN_URL}/${filename}`;
+        await axios.put(uploadUrl, finalImageBuffer, {
+            headers: { 'AccessKey': BUNNY_STORAGE_KEY, 'Content-Type': 'image/jpeg' }
+        });
+
+        const publicUrl = `${BUNNY_CDN_URL}/${filename}`;
+        console.log(`[ImageHandler] ✅ Imagen creada: ${publicUrl}`);
+
+        return publicUrl;
 
     } catch (error) {
         console.error(`[ImageHandler] Error: ${error.message}`);
