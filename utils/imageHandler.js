@@ -13,49 +13,48 @@ const IMG_WIDTH = 1280;
 const IMG_HEIGHT = 720;
 
 // =============================================================================
-// 🌎 DICCIONARIO DE BANDERAS (Detecta país en el título)
+// 🌎 DICCIONARIO DE CÓDIGOS ISO (Para descargar la bandera real)
 // =============================================================================
-const FLAGS = {
-    "paraguay": "🇵🇾", "py": "🇵🇾", "asunción": "🇵🇾",
-    "argentina": "🇦🇷", "ar": "🇦🇷", "buenos aires": "🇦🇷",
-    "brasil": "🇧🇷", "br": "🇧🇷", "rio de janeiro": "🇧🇷", "sao paulo": "🇧🇷",
-    "estados unidos": "🇺🇸", "usa": "🇺🇸", "eeuu": "🇺🇸", "trump": "🇺🇸", "biden": "🇺🇸",
-    "venezuela": "🇻🇪", "ve": "🇻🇪", "maduro": "🇻🇪", "caracas": "🇻🇪",
-    "mexico": "🇲🇽", "mx": "🇲🇽", "amlo": "🇲🇽",
-    "españa": "🇪🇸", "es": "🇪🇸", "madrid": "🇪🇸",
-    "colombia": "🇨🇴", "co": "🇨🇴", "bogota": "🇨🇴", "petro": "🇨🇴",
-    "chile": "🇨🇱", "cl": "🇨🇱", "santiago": "🇨🇱", "boric": "🇨🇱",
-    "peru": "🇵🇪", "pe": "🇵🇪", "lima": "🇵🇪",
-    "bolivia": "🇧🇴", "bo": "🇧🇴", "la paz": "🇧🇴",
-    "uruguay": "🇺🇾", "uy": "🇺🇾", "montevideo": "🇺🇾",
-    "ecuador": "🇪🇨", "ec": "🇪🇨", "quito": "🇪🇨",
-    "el salvador": "🇸🇻", "sv": "🇸🇻", "bukele": "🇸🇻",
-    "honduras": "🇭🇳", "hn": "🇭🇳",
-    "guatemala": "🇬🇹", "gt": "🇬🇹",
-    "nicaragua": "🇳🇮", "ni": "🇳🇮",
-    "costa rica": "🇨🇷", "cr": "🇨🇷",
-    "panama": "🇵🇦", "pa": "🇵🇦",
-    "cuba": "🇨🇺", "cu": "🇨🇺",
-    "rusia": "🇷🇺", "putin": "🇷🇺",
-    "ucrania": "🇺🇦", "zelensky": "🇺🇦",
-    "china": "🇨🇳", "xi jinping": "🇨🇳",
-    "israel": "🇮🇱", "gaza": "🇵🇸", "palestina": "🇵🇸",
-    "mundo": "🌎", "internacional": "🌎"
+const FLAG_CODES = {
+    "paraguay": "py", "py": "py", "asunción": "py",
+    "argentina": "ar", "ar": "ar", "buenos aires": "ar",
+    "brasil": "br", "br": "br", "rio de janeiro": "br", "sao paulo": "br",
+    "estados unidos": "us", "usa": "us", "eeuu": "us", "trump": "us", "biden": "us",
+    "venezuela": "ve", "ve": "ve", "maduro": "ve", "caracas": "ve",
+    "mexico": "mx", "mx": "mx", "amlo": "mx",
+    "españa": "es", "es": "es", "madrid": "es",
+    "colombia": "co", "co": "co", "bogota": "co", "petro": "co",
+    "chile": "cl", "cl": "cl", "santiago": "cl", "boric": "cl",
+    "peru": "pe", "pe": "pe", "lima": "pe",
+    "bolivia": "bo", "bo": "bo", "la paz": "bo",
+    "uruguay": "uy", "uy": "uy", "montevideo": "uy",
+    "ecuador": "ec", "ec": "ec", "quito": "ec",
+    "el salvador": "sv", "sv": "sv", "bukele": "sv",
+    "honduras": "hn", "hn": "hn",
+    "guatemala": "gt", "gt": "gt",
+    "nicaragua": "ni", "ni": "ni",
+    "costa rica": "cr", "cr": "cr",
+    "panama": "pa", "pa": "pa",
+    "cuba": "cu", "cu": "cu",
+    "rusia": "ru", "putin": "ru",
+    "ucrania": "ua", "zelensky": "ua",
+    "china": "cn", "xi jinping": "cn",
+    "israel": "il", "gaza": "ps", "palestina": "ps",
+    "mundo": "un", "internacional": "un" // 'un' es la bandera de la ONU
 };
 
 /**
- * Busca un emoji de bandera basado en el texto del título
+ * Busca el código ISO (ej: 'py', 'ar') basado en el título
  */
-function getFlagEmoji(text) {
-    if (!text) return "🌎";
+function getFlagCode(text) {
+    if (!text) return "un"; // Por defecto mundo/ONU
     const lowerText = text.toLowerCase();
     
     // Buscar coincidencia en el mapa
-    for (const [key, emoji] of Object.entries(FLAGS)) {
-        if (lowerText.includes(key)) return emoji;
+    for (const [key, code] of Object.entries(FLAG_CODES)) {
+        if (lowerText.includes(key)) return code;
     }
-    // Si no encuentra nada específico, no devolvemos nada (o podrías poner "🌎")
-    return ""; 
+    return null; 
 }
 
 // =============================================================================
@@ -70,20 +69,17 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
         }
 
         // 1. Limpieza y Preparación del Texto
-        // Quitamos comillas y espacios extra. Convertimos a MAYÚSCULAS para impacto.
         const cleanTitle = (textOverlay || "").replace(/["']/g, "").toUpperCase().trim();
-        
-        // Detectar bandera
-        const flagEmoji = getFlagEmoji(cleanTitle);
+        const flagCode = getFlagCode(cleanTitle);
 
-        console.log(`[ImageHandler] Generando estilo PRO: "${cleanTitle}" ${flagEmoji}`);
+        console.log(`[ImageHandler] Generando estilo PRO: "${cleanTitle}" (Bandera: ${flagCode || 'Ninguna'})`);
 
         // 2. GENERAR IMAGEN BASE (DeepInfra - SDXL Turbo)
-        // Pedimos estilo fotorealista para que, aunque esté borrosa, los colores sean reales.
+        // Pedimos "photorealistic" y "bokeh" para asegurar ese fondo borroso profesional
         const deepInfraRes = await axios.post(
             'https://api.deepinfra.com/v1/inference/stabilityai/sdxl-turbo',
             {
-                prompt: prompt + ", photorealistic, journalism style, 8k, news footage",
+                prompt: prompt + ", photorealistic, journalism style, 8k, news footage, bokeh background",
                 width: IMG_WIDTH,
                 height: IMG_HEIGHT,
                 num_inference_steps: 4 
@@ -95,53 +91,46 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
         const imageBuffer = Buffer.from(deepInfraRes.data.images[0].split(',')[1], 'base64');
 
 
-        // 3. PREPARAR EL SVG (Texto y Elementos Gráficos)
-        
-        // Lógica para dividir el texto en 2 líneas si es muy largo
+        // 3. PREPARAR TEXTO (SVG)
         const words = cleanTitle.split(' ');
         let line1 = cleanTitle;
         let line2 = "";
 
-        // Si tiene más de 4 palabras o es muy largo, cortamos a la mitad
+        // Dividir en 2 líneas si es largo
         if (words.length > 4 || cleanTitle.length > 25) {
             const mid = Math.ceil(words.length / 2);
             line1 = words.slice(0, mid).join(' ');
             line2 = words.slice(mid).join(' ');
         }
 
-        // Definimos posiciones Y (altura) dependiendo de si hay 1 o 2 líneas
-        // Para que quede siempre centrado verticalmente
+        // Posiciones Verticales (Ajustadas para dejar espacio a la bandera imagen)
         const line1Y = line2 ? "42%" : "48%";
         const line2Y = "56%";
-        const flagY  = line2 ? "78%" : "70%";
+        
+        // Calculamos dónde irá la bandera (en pixeles, para Sharp)
+        // 720px altura total. 
+        // Si hay 2 líneas, la bandera va más abajo (aprox 560px). Si hay 1, un poco más arriba (520px).
+        const flagTopPos = line2 ? 560 : 510;
+        const flagWidth = 140; // Tamaño de la bandera
+        const flagLeftPos = (IMG_WIDTH - flagWidth) / 2; // Centrado horizontal
 
-        const svgOverlay = `
+        const svgTextOverlay = `
         <svg width="${IMG_WIDTH}" height="${IMG_HEIGHT}">
             <style>
-                /* Fuente del Título: Grande, Gruesa (Bold), Blanca */
                 .title { 
                     fill: white; 
                     font-family: "Arial Black", "Arial", sans-serif; 
                     font-weight: 900; 
                     font-size: 85px; 
                     text-anchor: middle; 
-                    text-shadow: 0px 4px 10px rgba(0,0,0,0.8); /* Sombra suave para legibilidad extra */
+                    text-shadow: 0px 4px 10px rgba(0,0,0,0.8);
                 }
-                
-                /* Fuente de la Bandera */
-                .flag { 
-                    font-size: 100px; 
-                    text-anchor: middle; 
-                    text-shadow: 0px 4px 10px rgba(0,0,0,0.5);
-                }
-                
-                /* Fuente de la Web (Abajo) */
                 .source { 
                     fill: white; 
                     font-family: "Arial", sans-serif; 
                     font-weight: bold; 
-                    font-size: 28px; 
-                    opacity: 0.9; 
+                    font-size: 24px; 
+                    opacity: 0.8; 
                     text-anchor: middle;
                     letter-spacing: 1px;
                 }
@@ -149,40 +138,54 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
             
             <text x="50%" y="${line1Y}" class="title">${line1}</text>
             <text x="50%" y="${line2Y}" class="title">${line2}</text>
-            
-            <text x="50%" y="${flagY}" class="flag">${flagEmoji}</text>
 
-            <text x="50%" y="95%" class="source">Fuente: www.noticias.lat</text>
+            <text x="50%" y="96%" class="source">Fuente: www.noticias.lat</text>
         </svg>
         `;
 
+        // 4. PREPARAR CAPAS (COMPOSITE)
+        const compositeLayers = [
+             // 1. Capa Oscura (Velo negro al 50% para que se lea el texto)
+            {
+                input: Buffer.from(`<svg><rect width="${IMG_WIDTH}" height="${IMG_HEIGHT}" fill="black" opacity="0.5"/></svg>`),
+                blend: 'over'
+            },
+            // 2. Texto
+            {
+                input: Buffer.from(svgTextOverlay),
+                blend: 'over'
+            }
+        ];
 
-        // 4. COMPOSICIÓN FINAL CON SHARP
-        // Aquí aplicamos el Blur suave y la capa oscura
+        // 5. DESCARGAR Y AGREGAR LA BANDERA (Si existe código)
+        if (flagCode) {
+            try {
+                // Descargamos la bandera real desde FlagCDN
+                const flagUrl = `https://flagcdn.com/w160/${flagCode}.png`;
+                const flagBuffer = await axios.get(flagUrl, { responseType: 'arraybuffer' }).then(r => r.data);
+                
+                compositeLayers.push({
+                    input: flagBuffer,
+                    top: flagTopPos,
+                    left: parseInt(flagLeftPos),
+                    // Forzamos un tamaño estándar por si acaso
+                    // (FlagCDN w160 da ancho 160, el alto varía, pero Sharp lo maneja)
+                });
+            } catch (err) {
+                console.warn("[ImageHandler] No se pudo descargar la bandera, continuando sin ella.");
+            }
+        }
+
+        // 6. COMPOSICIÓN FINAL CON SHARP
         const finalImageBuffer = await sharp(imageBuffer)
             .resize(IMG_WIDTH, IMG_HEIGHT)
-            // BLUR: 5 es suave (como pediste). 
-            // Suficiente para ocultar defectos de IA, pero se entiende qué hay detrás.
-            .blur(5) 
-            .composite([
-                // 1. CAPA OSCURA (Velo negro)
-                // Opacidad 0.4 (40%) es suficiente para oscurecer y que el texto resalte,
-                // sin matar la foto de fondo.
-                {
-                    input: Buffer.from(`<svg><rect width="${IMG_WIDTH}" height="${IMG_HEIGHT}" fill="black" opacity="0.4"/></svg>`),
-                    blend: 'over'
-                },
-                // 2. TEXTO Y ELEMENTOS (El SVG que creamos arriba)
-                {
-                    input: Buffer.from(svgOverlay),
-                    blend: 'over'
-                }
-            ])
+            .blur(5) // Blur suave (5px) para ocultar defectos de IA
+            .composite(compositeLayers)
             .toFormat('jpg')
             .toBuffer();
 
 
-        // 5. SUBIDA A BUNNY STORAGE
+        // 7. SUBIDA A BUNNY STORAGE
         const filename = `news-pro-${uuidv4()}.jpg`;
         const uploadUrl = `https://ny.storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filename}`;
 
@@ -197,7 +200,6 @@ exports.generateNewsThumbnail = async (prompt, textOverlay) => {
 
     } catch (error) {
         console.error(`[ImageHandler] Error: ${error.message}`);
-        // Retornar null para manejar el error arriba si es necesario
         return null;
     }
 };
