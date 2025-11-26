@@ -31,29 +31,24 @@ const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
 
 /**
  * Limpiador de Categorías (SOLUCIÓN DEFINITIVA)
- * Convierte "Tecnología", "POLITICA", "[Deportes]" -> "tecnologia", "politica", "deportes"
  */
 function cleanCategory(rawCategory) {
     if (!rawCategory) return "general";
 
-    // 1. Quitar basura ([Categoría], "Texto", etc)
     let cleaned = rawCategory.toLowerCase()
         .replace('categoría:', '')
         .replace('categoria:', '')
-        .replace(/\[|\]|"/g, '') // Quitar corchetes y comillas
+        .replace(/\[|\]|"/g, '') 
         .trim();
 
-    // 2. Quitar acentos (Á -> a, é -> e, ñ -> n)
     cleaned = cleaned.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-    // 3. Validar contra lista oficial
     const validCats = ["politica", "economia", "deportes", "tecnologia", "entretenimiento", "salud", "internacional", "general"];
     
     if (validCats.includes(cleaned)) {
         return cleaned;
     }
     
-    // Fallback inteligente (si la IA inventó algo raro)
     return "general";
 }
 
@@ -62,25 +57,21 @@ function cleanCategory(rawCategory) {
  */
 async function fetchUrlContent(url) {
     try {
-        // Intentamos descargar el HTML con un timeout de 5 segundos
         const { data } = await axios.get(url, { 
-            timeout: 5000,
+            timeout: 8000, // Aumentamos un poco el tiempo de espera por si la web es lenta
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
         });
         
         const $ = cheerio.load(data);
-        
-        // Eliminamos scripts, estilos y basura
         $('script, style, nav, footer, header, iframe, .ads').remove();
 
-        // Extraemos el texto de los párrafos
         let text = '';
         $('p').each((i, el) => {
-            text += $(el).text() + '\n';
+            text += $(el).text() + '\n\n'; // Doble salto de línea para separar párrafos claramente
         });
 
-        // Limpiamos y cortamos para no gastar tokens infinitos
-        return text.trim().substring(0, 15000); 
+        // Aumentamos el límite de lectura a 25000 caracteres para no cortar noticias largas
+        return text.trim().substring(0, 25000); 
     } catch (error) {
         console.warn(`[BedrockClient] No se pudo leer contenido de ${url}: ${error.message}`);
         return null; 
@@ -89,7 +80,7 @@ async function fetchUrlContent(url) {
 
 
 // ============================================================================
-// 📻 FUNCIÓN 1: GENERADOR DE RADIOS (ORIGINAL)
+// 📻 FUNCIÓN 1: GENERADOR DE RADIOS
 // ============================================================================
 
 exports.generateRadioDescription = async (radio) => {
@@ -135,7 +126,6 @@ Directrices estrictas:
 // ============================================================================
 
 exports.generateImagePrompt = async (title, content) => {
-    // Usamos un fragmento del contenido para dar contexto
     const textContext = content.length > 500 ? content.substring(0, 1500) : title;
 
     const systemPrompt = `You are an expert AI Art Director for a serious News Channel (like BBC or CNN). 
@@ -178,11 +168,8 @@ Context: "${textContext}..."`;
         
         if (responseBody.content && responseBody.content.length > 0) {
             let prompt = responseBody.content[0].text.trim();
-            // Limpieza extra por si acaso la IA contesta "Here is the prompt: ..."
             prompt = prompt.replace(/^(Here is the prompt:|Prompt:|SDXL Prompt:)/i, '').trim();
-            // Quitamos comillas si las puso
             prompt = prompt.replace(/^"|"$/g, '');
-            
             console.log(`[Bedrock Image] Prompt generado: "${prompt.substring(0, 50)}..."`);
             return prompt;
         }
@@ -190,14 +177,13 @@ Context: "${textContext}..."`;
 
     } catch (error) {
         console.error(`Error Bedrock Image Prompt:`, error.message);
-        // Fallback simple si falla la IA
         return `hyperrealistic news image about ${title}, cinematic lighting, 8k, dramatic`; 
     }
 };
 
 
 // ============================================================================
-// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS (TEXTO + DATOS EXTRA)
+// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS (AJUSTADO PARA EXTENSIÓN)
 // ============================================================================
 
 exports.generateArticleContent = async (article) => {
@@ -208,41 +194,46 @@ exports.generateArticleContent = async (article) => {
         return null;
     }
 
-    // 1. Intentamos leer el contenido real de la web
     console.log(`[BedrockClient] Leyendo URL: ${url}...`);
     const contenidoReal = await fetchUrlContent(url);
 
     let promptContexto = "";
     if (contenidoReal && contenidoReal.length > 300) {
-        promptContexto = `FUENTE REAL (Úsala como verdad absoluta):\n--- INICIO ---\n${contenidoReal}\n--- FIN ---`;
+        promptContexto = `FUENTE REAL (Texto completo del artículo original):\n--- INICIO ---\n${contenidoReal}\n--- FIN ---`;
     } else {
-        promptContexto = `FUENTE LIMITADA (Completa con tu conocimiento general):\nTítulo: "${title}"\nDescripción: "${description || 'Sin descripción'}"\nPaís: "${paisLocal || 'Internacional'}"`;
+        promptContexto = `FUENTE LIMITADA (Completa con contexto inteligente):\nTítulo: "${title}"\nDescripción: "${description || 'Sin descripción'}"\nPaís: "${paisLocal || 'Internacional'}"`;
     }
 
-    // --- SYSTEM PROMPT MAESTRO (PROFESIONAL / NO-SENSACIONALISTA) ---
-    const systemPrompt = `Eres el Editor Jefe de un medio internacional serio y profesional (estilo BBC, CNN o Reuters).
-Tu misión es informar con VERACIDAD y OBJETIVIDAD. 
+    // --- SYSTEM PROMPT MAESTRO (VERSIÓN LARGA Y DETALLADA) ---
+    // --- SYSTEM PROMPT MAESTRO (AQUÍ ESTÁ LA MAGIA) ---
+    const systemPrompt = `Eres el Editor Jefe de un diario internacional de alto nivel.
+TU OBJETIVO PRINCIPAL: Leer TODO el contenido fuente y generar titulares PRECISOS y artículos COMPLETOS.
 
-TU TAREA: Analiza la fuente y genera una respuesta con una ESTRUCTURA ESTRICTA de 4 partes.
+--- INSTRUCCIONES PARA "TEXTO IMAGEN" (CRUCIAL) ---
+Este texto va en la portada. Si fallas aquí, la noticia no sirve.
+1. **LEE LA NOTICIA ENTERA** para entender de qué se trata realmente.
+2. **PROHIBIDO:** - NO uses frases incompletas que terminen en "de", "el", "sobre", "que".
+   - NO escribas "Experto habla sobre...", "Lo que se sabe de...", "Increíble suceso".
+   - NO uses clickbait barato.
+3. **OBLIGATORIO - LA FÓRMULA DE 3 A 6 PALABRAS:**
+   - Debe ser [SUJETO] + [ACCIÓN/LUGAR].
+   - Debe tener sentido por sí mismo.
+   - EJEMPLOS CORRECTOS: "Shakira Llega a Paraguay", "Trump Amenaza a Maduro", "Caída del Dólar en Argentina", "Putin Advierte a la OTAN".
+   - EJEMPLO INCORRECTO: "El presidente dijo que", "Situación en la frontera de".
 
---- ESTRUCTURA DE SALIDA OBLIGATORIA ---
+--- INSTRUCCIONES DE REDACCIÓN (IMPORTANTE) ---
+1. **ADAPTABILIDAD:** Si la fuente original es EXTENSA y detallada, tu artículo DEBE SER LARGO. No resumas; mantén todos los detalles y profundidad.
+2. Si la fuente es CORTA, escribe algo conciso pero agrega contexto (antecedentes reales) para que se entienda mejor. NO inventes hechos.
+3. Escribe con tus propias palabras (parafraseo profesional).
+
+--- ESTRUCTURA DE SALIDA (NO ROMPER) ---
 LÍNEA 1: [CATEGORÍA] (Una sola palabra: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2: TÍTULO VIRAL: [Un título atractivo para web, aprox 8-12 palabras, interesante pero sin mentir].
-LÍNEA 3: TEXTO IMAGEN: [RESUMEN INFORMATIVO CORTO (3 a 5 palabras). 
-    - OBJETIVO: Describir QUÉ pasa y DÓNDE/QUIÉN.
-    - PROHIBIDO: Palabras genéricas como "CAOS TOTAL", "ALERTA", "ÚLTIMO MOMENTO", "MIRA ESTO".
-    - FORMATO CORRECTO: "Sujeto + Verbo/Lugar".
-    - EJEMPLOS BIEN: "Shakira en Paraguay", "Trump amenaza a Maduro", "Sismo en México", "Boca gana a River".
-    - EJEMPLOS MAL: "Terrible Noticia", "No creerás esto", "Final Inesperado"].
-LÍNEA 4 en adelante: [CUERPO DE LA NOTICIA] (Mínimo 500 palabras. Usa un tono periodístico formal, párrafos cortos, estructura clara).
-
---- REGLAS DE REDACCIÓN ---
-1. Sé objetivo. Evita adjetivos exagerados (increíble, espantoso, milagroso).
-2. NO inventes cifras ni fechas que no estén en la fuente.
-3. El "TEXTO IMAGEN" es lo más importante: debe ser el titular resumido.
+LÍNEA 2: TÍTULO VIRAL: [Título web completo, 8-13 palabras, basado en el contenido real].
+LÍNEA 3: TEXTO IMAGEN: [Tu mejor titular corto de 3-6 palabras. REVISA QUE NO TERMINE EN PREPOSICIÓN].
+LÍNEA 4 en adelante: [CUERPO DEL ARTÍCULO]
 `;
 
-    const userPrompt = `Procesa esta noticia: ${url}
+    const userPrompt = `Procesa esta noticia para su publicación: ${url}
     
 ${promptContexto}`;
 
@@ -253,7 +244,7 @@ ${promptContexto}`;
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
             max_tokens: 4000, 
-            temperature: 0.4, // Temperatura baja para ser más preciso y serio
+            temperature: 0.5, // Subimos un poco la temperatura para que parafrasee mejor y escriba más fluido
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
@@ -266,38 +257,30 @@ ${promptContexto}`;
 
         if (responseBody.content && responseBody.content.length > 0) {
             let fullText = responseBody.content[0].text.trim();
-            
-            // Procesamos línea por línea
             const lines = fullText.split('\n').filter(line => line.trim() !== '');
             
             if (lines.length < 4) {
-                console.warn("[Bedrock] La IA no respetó el formato estricto. Intentando recuperar...");
-                // Fallback básico
+                console.warn("[Bedrock] Fallo de formato. Recuperando...");
                 return { 
                     categoria: "general", 
                     tituloViral: title, 
-                    textoImagen: title.substring(0, 20), // Usamos el título real cortado en vez de "URGENTE"
+                    textoImagen: title.substring(0, 20),
                     articuloGenerado: fullText 
                 };
             }
             
-            // 1. Extraer y LIMPIAR Categoría
             let rawCat = lines[0];
             let categoria = cleanCategory(rawCat);
-
-            // 2. Extraer resto
             let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
             let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
             
-            // Limpieza de seguridad por si la IA falla y pone algo muy largo
             if (textoImagen.length > 40) {
-                 // Si es muy largo, tomamos las primeras 4 palabras del título viral
                  textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
             }
             
             const articuloGenerado = lines.slice(3).join('\n').trim();
 
-            console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Imagen: "${textoImagen}"`);
+            console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Longitud: ${articuloGenerado.length} chars`);
             
             return {
                 categoriaSugerida: categoria, 
