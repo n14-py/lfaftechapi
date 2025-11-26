@@ -95,20 +95,54 @@ exports.generateNewsThumbnail = async (prompt, textOverlay, forcedCountryCode) =
         const imageBuffer = Buffer.from(deepInfraRes.data.images[0].split(',')[1], 'base64');
 
 
-        // 3. PREPARAR DISEÑO SVG (Estilo CNN/BBC)
+       // 3. PREPARAR DISEÑO SVG (Estilo CNN/BBC Mejorado)
         const words = cleanTitle.split(' ');
         let line1 = cleanTitle;
         let line2 = "";
+        let fontSize = 90; // Tamaño base gigante (para textos cortos)
 
-        // Cortar texto si es largo
-        if (words.length > 4 || cleanTitle.length > 25) {
-            const mid = Math.ceil(words.length / 2);
-            line1 = words.slice(0, mid).join(' ');
-            line2 = words.slice(mid).join(' ');
+        // A) LÓGICA INTELIGENTE DE DIVISIÓN DE LÍNEAS
+        // Si el texto total tiene más de 15 caracteres y varias palabras, lo dividimos en dos.
+        if (cleanTitle.length > 15 && words.length > 1) {
+            // Buscamos el punto medio aproximado en caracteres para que las líneas queden parejas
+            const targetLength = cleanTitle.length / 2;
+            let currentLength = 0;
+            let splitIndex = 0;
+
+            for (let i = 0; i < words.length; i++) {
+                currentLength += words[i].length + 1; // +1 por el espacio
+                if (currentLength >= targetLength) {
+                    // Si esta palabra se pasa del medio, decidimos si cortar antes o después
+                    // para que quede más equilibrado.
+                    const diffBefore = Math.abs((currentLength - words[i].length - 1) - targetLength);
+                    const diffAfter = Math.abs(currentLength - targetLength);
+                    splitIndex = (diffAfter < diffBefore) ? i : i - 1;
+                    break;
+                }
+                splitIndex = i;
+            }
+            // Asegurar que no quede la primera línea vacía si la primera palabra es muy larga
+            if (splitIndex < 0) splitIndex = 0;
+
+            line1 = words.slice(0, splitIndex + 1).join(' ');
+            line2 = words.slice(splitIndex + 1).join(' ');
         }
 
-        // Posición vertical del texto (centrado)
-        const textY = line2 ? "45%" : "50%"; 
+        // B) LÓGICA DE TAMAÑO DINÁMICO (Para que no se corte)
+        // Medimos la línea más larga resultante.
+        const maxCharsInALine = Math.max(line1.length, line2.length);
+
+        // Arial Black es muy ancha. Si supera ciertos caracteres, reducimos la fuente.
+        if (maxCharsInALine > 19) {
+            fontSize = 65; // Reducción fuerte para textos muy anchos (ej: la de Milei que pasaste)
+        } else if (maxCharsInALine > 14) {
+            fontSize = 78; // Reducción media
+        }
+        // Si tiene 14 chars o menos, se queda en 90px (impacto total)
+
+        // Ajustes de posición basados en si hay 2 líneas y el tamaño
+        const textY = line2 ? (fontSize < 90 ? "47%" : "45%") : "50%"; // Centrado vertical fino
+        const lineHeightSpacing = fontSize * 1.15; // Espaciado entre líneas dinámico
 
         const svgOverlay = `
         <svg width="${IMG_WIDTH}" height="${IMG_HEIGHT}">
@@ -132,7 +166,8 @@ exports.generateNewsThumbnail = async (prompt, textOverlay, forcedCountryCode) =
                     fill: white; 
                     font-family: "Arial Black", "Arial", sans-serif; 
                     font-weight: 900; 
-                    font-size: 90px; 
+                    /* AQUÍ USAMOS EL TAMAÑO DINÁMICO */
+                    font-size: ${fontSize}px; 
                     text-anchor: middle;
                     letter-spacing: -2px;
                 }
@@ -144,22 +179,22 @@ exports.generateNewsThumbnail = async (prompt, textOverlay, forcedCountryCode) =
                     text-anchor: middle;
                     opacity: 0.9;
                 }
-                .footer-line { fill: #e91e63; } 
+                /* AQUÍ CAMBIAMOS EL COLOR DE LA BARRA AL AZUL */
+                .footer-line { fill: #007bff; } 
             </style>
             
             <text x="50%" y="${textY}" class="title" filter="url(#dropShadow)">
                 <tspan x="50%" dy="0">${line1}</tspan>
-                ${line2 ? `<tspan x="50%" dy="105">${line2}</tspan>` : ''}
+                ${line2 ? `<tspan x="50%" dy="${lineHeightSpacing}">${line2}</tspan>` : ''}
             </text>
 
             <rect x="0" y="${IMG_HEIGHT - 12}" width="${IMG_WIDTH}" height="12" class="footer-line" />
             
             <text x="50%" y="${IMG_HEIGHT - 40}" class="source-text" filter="url(#dropShadow)">
-                Fuente: www.noticias.lat
+                www.noticias.lat
             </text>
         </svg>
         `;
-
         // 4. COMPOSICIÓN FINAL (Capas)
         const compositeLayers = [
             // Fondo oscuro suave
