@@ -196,8 +196,9 @@ Context: "${textContext}..."`;
 };
 
 
+
 // ============================================================================
-// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS (AJUSTADO PARA EXTENSIÓN)
+// 📰 FUNCIÓN 3: GENERADOR DE NOTICIAS (BLINDADO: LARGO + TÍTULOS COMPLETOS)
 // ============================================================================
 
 exports.generateArticleContent = async (article) => {
@@ -216,26 +217,33 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA (El scraper no pudo leer todo): Título: "${title}". Descripción: "${description}".`;
     }
 
-    // --- PROMPT AGRESIVO PARA LONGITUD ---
-    const systemPrompt = `Eres un Periodista Senior de Investigación. Tu trabajo NO es resumir, sino EXPANDIR y PROFUNDIZAR.
+    // --- SYSTEM PROMPT MAESTRO (ANTI-RECORTES Y PRO-LONGITUD) ---
+    const systemPrompt = `Eres un Periodista Senior de Investigación de un medio de prestigio.
+TU TAREA: Leer TODO el contenido y redactar la noticia definitiva.
 
-OBJETIVO: Redactar un artículo DETALLADO y LARGO (Mínimo 800 - 1200 palabras si la fuente lo permite).
+--- REGLA #1: EL "TEXTO IMAGEN" (CRÍTICO) ---
+Es el texto corto que va en la foto. Si falla, la portada se ve ridícula.
+1. **LONGITUD:** Exactamente entre 3 y 6 palabras.
+2. **COMPLETITUD:** ¡PROHIBIDO DEJAR LA FRASE ABIERTA!
+   - ❌ MAL: "Milei confirma viaje a" (Termina en preposición)
+   - ❌ MAL: "El presidente dijo que" (No dice qué)
+   - ✅ BIEN: "Milei viaja a Estados Unidos" (Sujeto + Acción + Destino)
+   - ✅ BIEN: "Aumenta el Dólar Blue" (Acción + Sujeto)
+3. **FORMATO:** Debe entenderse por sí solo. No uses puntos suspensivos.
 
---- REGLAS DE ORO ---
-1. **LONGITUD:** Prohibido hacer artículos cortos. Si la fuente es breve, agrega contexto histórico, antecedentes políticos o económicos, y explica las implicaciones. ¡Escribe mucho!
-2. **ESTILO:** Usa un tono formal, periodístico y atrapante. Estructura con Introducción fuerte, Desarrollo profundo y Conclusión.
-3. **TITULARES:** - Título Viral: Atractivo pero serio (aprox 10 palabras).
-   - Texto Imagen: SOLO 3 a 6 palabras clave. Ej: "Sube el Dólar en Argentina". NUNCA uses "Experto opina sobre".
-4. **VERACIDAD:** No inventes datos falsos, pero sí puedes usar tu conocimiento general para explicar conceptos complejos mencionados en la noticia.
+--- REGLA #2: EL ARTÍCULO (EXTENSIÓN) ---
+1. Si la fuente original es **LARGA** y detallada, tu redacción DEBE SER LARGA (mínimo 1000-2000 palabras). NO RESUMAS. Conserva nombres, fechas y matices.
+2. Si la fuente es CORTA, usa tu conocimiento para agregar **contexto y antecedentes** (sin inventar la noticia del día) para que el artículo se sienta completo y profesional.
+3. Escribe con párrafos cortos y ritmo ágil.
 
---- ESTRUCTURA DE SALIDA ---
+--- ESTRUCTURA DE SALIDA OBLIGATORIA ---
 LÍNEA 1: [CATEGORÍA] (politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general).
-LÍNEA 2: TÍTULO VIRAL: [Título largo aquí]
-LÍNEA 3: TEXTO IMAGEN: [Título corto aquí]
+LÍNEA 2: TÍTULO VIRAL: [Título web atractivo, 8-15 palabras].
+LÍNEA 3: TEXTO IMAGEN: [Frase de 3-7 palabras. REVISA QUE NO TERMINE EN "A", "DE", "EN", "POR"].
 LÍNEA 4 en adelante: [CUERPO DEL ARTÍCULO EXTENSO]
 `;
 
-    const userPrompt = `Analiza esta fuente y escribe el artículo COMPLETO:
+    const userPrompt = `Analiza esta fuente y escribe el artículo COMPLETO. Asegúrate que el Texto Imagen esté completo:
 ${promptContexto}`;
 
     const payload = {
@@ -244,14 +252,13 @@ ${promptContexto}`;
         accept: 'application/json',
         body: JSON.stringify({
             anthropic_version: 'bedrock-2023-05-31',
-            max_tokens: 6000, // AUMENTADO DE 4000 A 6000
-            temperature: 0.6, // UN POCO MÁS CREATIVO PARA QUE ESCRIBA MÁS
+            max_tokens: 6000, // Máximo espacio para que escriba largo
+            temperature: 0.5, 
             system: systemPrompt,
             messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }]
         })
     };
 
-    // ... (El resto del código de try/catch es igual, solo cambia el prompt y max_tokens)
     try {
         const command = new InvokeModelCommand(payload);
         const response = await client.send(command);
@@ -261,22 +268,57 @@ ${promptContexto}`;
             let fullText = responseBody.content[0].text.trim();
             const lines = fullText.split('\n').filter(line => line.trim() !== '');
             
-            if (lines.length < 4) return { categoria: "general", tituloViral: title, textoImagen: "NOTICIA DEL DÍA", articuloGenerado: fullText };
+            // Fallback de emergencia si la IA no respeta las líneas
+            if (lines.length < 4) {
+                return { 
+                    categoria: "general", 
+                    tituloViral: title, 
+                    textoImagen: title.split(' ').slice(0, 4).join(' '), // Usamos título original cortado
+                    articuloGenerado: fullText 
+                };
+            }
             
             let rawCat = lines[0];
             let categoria = cleanCategory(rawCat);
             let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
             let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
             
-            if (textoImagen.length > 45) textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
+            // --- 🛡️ FILTRO DE SEGURIDAD PARA TÍTULOS CORTADOS 🛡️ ---
+            // Si la IA devuelve basura como "Viaje a", lo detectamos y corregimos aquí mismo.
+            
+            // 1. Lista de palabras prohibidas al final
+            const palabrasProhibidasFinal = [' a', ' de', ' en', ' por', ' con', ' sin', ' el', ' la', ' los', ' las', ' un', ' una', ' que', ' y', ' o', ' pero'];
+            
+            // Verificamos si termina en alguna de esas
+            const terminaMal = palabrasProhibidasFinal.some(p => textoImagen.toLowerCase().endsWith(p));
+            
+            if (terminaMal || textoImagen.length < 5) {
+                 console.warn(`[Bedrock] CORRECCIÓN AUTOMÁTICA: Texto imagen inválido ("${textoImagen}"). Usando fallback.`);
+                 // PLAN B: Tomamos las primeras 4 palabras del TÍTULO VIRAL (que suele estar bien)
+                 textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
+            }
+            
+            // Limpieza extra de seguridad (largo máximo)
+            if (textoImagen.length > 50) {
+                 textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
+            }
             
             const articuloGenerado = lines.slice(3).join('\n').trim();
+
+            console.log(`[Bedrock] OK. Título: "${tituloViral.substring(0,30)}..." | Img: "${textoImagen}" | Length: ${articuloGenerado.length}`);
             
-            return { categoria, tituloViral, textoImagen, articuloGenerado };
+            return {
+                categoriaSugerida: categoria, 
+                categoria: categoria,       
+                tituloViral: tituloViral,
+                textoImagen: textoImagen,
+                articuloGenerado: articuloGenerado
+            };
         }
         return null;
+
     } catch (error) {
-        console.error(`Error Bedrock:`, error.message);
+        console.error(`Error Bedrock News:`, error.message);
         return null; 
     }
 };
