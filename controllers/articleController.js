@@ -146,7 +146,7 @@ exports.getRecommendedArticles = async (req, res) => {
         const recommended = await Article.find(filtro)
             .sort({ fecha: -1 })
             .skip(randomSkip)
-            .limit(4); 
+            .limit(12); 
 
         res.json(recommended);
 
