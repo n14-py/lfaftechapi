@@ -1,28 +1,26 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- ¡VERSIÓN FINAL: MULTI-BOTS (RENDER FREE) + IMAGEN ORIGINAL! ---
+// --- VERSIÓN: GESTIÓN DE ZOMBIES + PING DESPERTADOR + FETCH BAJO DEMANDA ---
 
 const axios = require('axios');
 const Article = require('../models/article');
 
-// 1. IMPORTAMOS SOLO LA IA DE TEXTO (Ya no usamos la de imagen)
+// 1. IMPORTAMOS SOLO LA IA DE TEXTO
 const { generateArticleContent } = require('../utils/bedrockClient');
 
-// --- CONFIGURACIÓN DE MULTI-BOTS DE VIDEO (RENDER FREE) ---
-// Cargamos las URLs de tus 3 instancias desde el .env
+// --- CONFIGURACIÓN DE MULTI-BOTS ---
 const VIDEO_BOT_URLS = [
     process.env.VIDEO_BOT_URL_1,
     process.env.VIDEO_BOT_URL_2,
     process.env.VIDEO_BOT_URL_3
-].filter(Boolean); // Esto elimina las que estén vacías si alguna no está configurada
+].filter(Boolean);
 
-// Reusamos la misma clave de admin para todos
 const VIDEO_BOT_KEY = process.env.ADMIN_API_KEY; 
 
-// Variable para rotar entre los bots (Round Robin)
 let currentBotIndex = 0;
 
-// --- Constantes de Recolección ---
+// --- Configuración de Recolección ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
+const TIMEOUT_ZOMBIES_MINUTES = 30; // Si tarda más de 30 min, lo consideramos muerto y liberamos el slot
 
 const paisNewsDataMap = {
     "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
@@ -48,40 +46,77 @@ let isNewsWorkerRunning = false;
 let isFetchWorkerRunning = false;
 let globalArticleQueue = []; 
 
-// --- Claves de APIs de Noticias (Con Rotación) ---
+// --- Claves (Rotación) ---
 const gnewsKeys = [
-    process.env.GNEWS_API_KEY,
-    process.env.GNEWS_API_KEY_2,
-    process.env.GNEWS_API_KEY_3,
-    process.env.GNEWS_API_KEY_4
+    process.env.GNEWS_API_KEY, process.env.GNEWS_API_KEY_2, process.env.GNEWS_API_KEY_3, process.env.GNEWS_API_KEY_4
 ].filter(Boolean);
 
 const newsDataKeys = [
-    process.env.NEWSDATA_API_KEY,
-    process.env.NEWSDATA_API_KEY_2,
-    process.env.NEWSDATA_API_KEY_3,
-    process.env.NEWSDATA_API_KEY_4
+    process.env.NEWSDATA_API_KEY, process.env.NEWSDATA_API_KEY_2, process.env.NEWSDATA_API_KEY_3, process.env.NEWSDATA_API_KEY_4
 ].filter(Boolean);
 
 let currentGNewsKeyIndex = 0;
 let currentNewsDataKeyIndex = 0;
 
-
 // =========================================================================
-// PARTE 1: EL RECOLECTOR (Busca noticias y guarda la imagen original)
+// HELPER: RESETEAR ZOMBIES (IMPORTANTE PARA TU PROBLEMA)
 // =========================================================================
+/**
+ * Busca videos que quedaron en 'processing' por error (reinicio del server, crash)
+ * y los devuelve a 'pending' para que no ocupen espacio fantasma.
+ */
+async function _resetStuckVideos(forceAll = false) {
+    try {
+        let filtro = { videoProcessingStatus: 'processing' };
+        
+        // Si no forzamos todos, solo buscamos los que llevan mucho tiempo bloqueados (timeout)
+        if (!forceAll) {
+            const timeLimit = new Date(Date.now() - TIMEOUT_ZOMBIES_MINUTES * 60 * 1000);
+            filtro.updatedAt = { $lt: timeLimit };
+        }
 
-const runNewsAPIFetch = async () => {
-    if (isFetchWorkerRunning) {
-        console.warn("[RECOLECTOR] Ya estaba corriendo. Saltando.");
-        return;
+        const result = await Article.updateMany(
+            filtro,
+            { $set: { videoProcessingStatus: 'pending' } } // Los devolvemos a la fila
+        );
+
+        if (result.modifiedCount > 0) {
+            console.log(`[ZOMBIE CLEANER] 🧟 Se liberaron ${result.modifiedCount} bots que estaban pegados.`);
+        }
+    } catch (e) {
+        console.error(`[ZOMBIE CLEANER] Error limpiando: ${e.message}`);
     }
+}
+
+// =========================================================================
+// HELPER: PING DESPERTADOR (Wake up Render)
+// =========================================================================
+async function _wakeUpBot(url) {
+    console.log(`[Ping] Despertando bot: ${url} ...`);
+    try {
+        // Timeout corto de 5s, solo queremos ver si responde o forzar que Render lo arranque
+        await axios.get(url, { timeout: 5000 });
+        return true;
+    } catch (e) {
+        // Incluso si da error 404 (porque quizás no hay ruta GET /), significa que el server respondió
+        // Si es timeout, es que se está despertando.
+        console.log(`[Ping] Bot ${url} contactado (Status: ${e.response?.status || 'No response'}).`);
+        return true;
+    }
+}
+
+
+// =========================================================================
+// PARTE 1: EL RECOLECTOR
+// =========================================================================
+const runNewsAPIFetch = async () => {
+    if (isFetchWorkerRunning) return;
     isFetchWorkerRunning = true;
     currentGNewsKeyIndex = 0;
     currentNewsDataKeyIndex = 0;
 
     try {
-        console.log(`(Recolector) Iniciando... (GNews Keys: ${gnewsKeys.length}, NewsData Keys: ${newsDataKeys.length})`);
+        console.log(`(Recolector) 📥 ¡Fila vacía! Buscando noticias nuevas...`);
 
         let articulosCrudos = []; 
         
@@ -97,16 +132,13 @@ const runNewsAPIFetch = async () => {
                     
                     if (response.data.results) {
                         response.data.results.forEach(article => {
-                            // IMPORTANTE: Solo aceptamos si tiene título, link E IMAGEN
-                            if (!article.title || !article.link || !article.image_url) return; 
-                            
+                            if (!article.title || !article.link || !article.image_url) return;
                             const paisNombreCompleto = article.country ? article.country[0] : 'unknown';
                             const paisCodigo = paisNewsDataMap[paisNombreCompleto.toLowerCase()] || paisNombreCompleto;
-                            
                             articulosCrudos.push({
                                 title: article.title,
                                 description: article.description || 'Sin descripción.',
-                                image: article.image_url, // USAMOS LA ORIGINAL
+                                image: article.image_url,
                                 source: { name: article.source_id || 'Fuente Desconocida' },
                                 url: article.link,
                                 publishedAt: article.pubDate,
@@ -121,9 +153,7 @@ const runNewsAPIFetch = async () => {
                         currentNewsDataKeyIndex = (currentNewsDataKeyIndex + 1) % newsDataKeys.length;
                         attempts++;
                         await sleep(1000); 
-                    } else {
-                        break; 
-                    }
+                    } else { break; }
                 }
             } 
             await sleep(2000); 
@@ -138,9 +168,7 @@ const runNewsAPIFetch = async () => {
                     const currentKey = gnewsKeys[currentGNewsKeyIndex];
                     const urlGNews = `https://gnews.io/api/v4/top-headlines?country=${pais}&lang=es&max=${MAX_ARTICLES_PER_COUNTRY}&apikey=${currentKey}`;
                     const response = await axios.get(urlGNews);
-                    
                     response.data.articles.forEach(article => {
-                        // IMPORTANTE: Solo aceptamos si tiene título, url E IMAGEN
                         if (!article.title || !article.url || !article.image) return; 
                         articulosCrudos.push({ ...article, paisLocal: pais });
                     });
@@ -151,22 +179,16 @@ const runNewsAPIFetch = async () => {
                         currentGNewsKeyIndex = (currentGNewsKeyIndex + 1) % gnewsKeys.length; 
                         attempts++;
                         await sleep(1000); 
-                    } else {
-                        break; 
-                    }
+                    } else { break; }
                 }
             }
             await sleep(1000); 
         }
 
-        // --- C. FILTRADO (Solo nuevos) ---
+        // --- C. FILTRADO ---
         const urlsRecibidas = articulosCrudos.map(article => article.url);
-        
-        // Chequear DB
         const articulosExistentesDB = await Article.find({ enlaceOriginal: { $in: urlsRecibidas } }).select('enlaceOriginal');
         const urlsExistentesDB = new Set(articulosExistentesDB.map(a => a.enlaceOriginal));
-        
-        // Chequear Fila en Memoria
         const urlsEnFila = new Set(globalArticleQueue.map(a => a.url));
 
         const articulosNuevos = articulosCrudos.filter(article => {
@@ -175,7 +197,9 @@ const runNewsAPIFetch = async () => {
         
         if (articulosNuevos.length > 0) {
             globalArticleQueue.push(...articulosNuevos);
-            console.log(`(Recolector) ¡${articulosNuevos.length} noticias nuevas en fila! Total: ${globalArticleQueue.length}`);
+            console.log(`(Recolector) ✅ Se añadieron ${articulosNuevos.length} noticias a la cola de trabajo.`);
+        } else {
+            console.log(`(Recolector) ⚠️ No se encontraron noticias nuevas en esta ronda.`);
         }
         
     } catch (error) {
@@ -188,121 +212,125 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 
 
 // =========================================================================
-// PARTE 2: EL GESTOR DE BOTS DE VIDEO (BALANCEO DE CARGA)
+// PARTE 2: EL GESTOR DE BOTS (Con Ping)
 // =========================================================================
 
-/**
- * [INTERNO] Envía el trabajo a uno de los bots disponibles.
- * Rota entre URL_1, URL_2 y URL_3.
- */
 async function _triggerVideoBotWithRotation(article) {
     if (VIDEO_BOT_URLS.length === 0) {
-        console.warn(`[VideoBot] ❌ NO HAY BOTS CONFIGURADOS en .env (VIDEO_BOT_URL_1, etc).`);
+        console.warn(`[VideoBot] ❌ NO HAY BOTS CONFIGURADOS.`);
         return;
     }
 
-    // 1. Verificar si el artículo existe
     const articleCheck = await Article.findById(article._id);
     if (!articleCheck) return;
 
-    // 2. Seleccionar el Bot que toca (Round Robin)
+    // Seleccionar Bot
     const targetBotUrl = VIDEO_BOT_URLS[currentBotIndex];
-    console.log(`[VideoBot] Asignando tarea al Bot #${currentBotIndex + 1}: ${targetBotUrl}`);
-    
-    // Avanzar el índice para la próxima vez (0 -> 1 -> 2 -> 0)
     currentBotIndex = (currentBotIndex + 1) % VIDEO_BOT_URLS.length;
 
     try {
-        // 3. Marcar como 'processing'
+        // 1. Marcar como 'processing' ANTES de enviar
         articleCheck.videoProcessingStatus = 'processing';
         await articleCheck.save();
 
-        // 4. Payload (Usando la imagen ORIGINAL)
+        // 2. ¡DESPERTAR AL BOT! (Ping)
+        // Esto evita errores de timeout si Render lo durmió
+        await _wakeUpBot(targetBotUrl);
+
+        // 3. Payload
         const payload = {
             text: articleCheck.articuloGenerado, 
             title: articleCheck.titulo,            
-            image_url: articleCheck.imagen, // <--- URL ORIGINAL DE LA NOTICIA
+            image_url: articleCheck.imagen, 
             article_id: articleCheck._id 
         };
 
-        // 5. Llamar al bot (Fire and forget, el bot llamará al callback)
-        // Usamos un timeout corto de conexión, pero el proceso allá tarda minutos.
+        // 4. Enviar trabajo
+        console.log(`[VideoBot] Enviando tarea a ${targetBotUrl}...`);
         await axios.post(`${targetBotUrl}/generate_video`, payload, { 
-            headers: { 'x-api-key': VIDEO_BOT_KEY }
+            headers: { 'x-api-key': VIDEO_BOT_KEY },
+            timeout: 10000 // Timeout corto para el handshake
         });
 
-        console.log(`[VideoBot] Tarea enviada correctamente a Bot.`);
+        console.log(`[VideoBot] 🚀 Tarea aceptada por el bot.`);
 
     } catch (error) {
-        console.error(`[VideoBot] Error enviando a Bot: ${error.message}`);
-        // Si falló el envío, volvemos a 'pending' o 'failed'
-        articleCheck.videoProcessingStatus = 'failed';
+        console.error(`[VideoBot] ❌ Error conectando con Bot: ${error.message}`);
+        // Si falló la conexión, devolvemos a 'pending' para que otro bot (o el mismo más tarde) lo intente
+        articleCheck.videoProcessingStatus = 'pending';
         await articleCheck.save();
     }
 }
 
 
 // =========================================================================
-// PARTE 3: EL WORKER CONTROLADOR (SEMÁFORO)
+// PARTE 3: EL WORKER CONTROLADOR (CICLO BAJO DEMANDA)
 // =========================================================================
 
-/**
- * [PRIVADO] API para activar recolección
- */
 exports.syncNewsAPIs = async (req, res) => {
-    res.json({ message: "Recolector iniciado." });
+    res.json({ message: "Disparador manual activado." });
     runNewsAPIFetch();
 };
 
-/**
- * [PRIVADO] Inicia el worker
- */
-exports.startNewsWorker = () => {
+exports.startNewsWorker = async () => {
     if (isNewsWorkerRunning) return;
-    console.log(`[News Worker] Iniciando con ${VIDEO_BOT_URLS.length} Bots de Video disponibles.`);
+    
+    console.log(`[News Worker] 🟢 INICIANDO SISTEMA...`);
+    
+    // --- LIMPIEZA INICIAL ---
+    // Reseteamos TODO lo que quedó "processing" al reiniciar el server
+    // Esto arregla el bug de "3/3 ocupados" al instante.
+    await _resetStuckVideos(true); 
+
     isNewsWorkerRunning = true;
     _runNewsWorker(); 
 };
 
-/**
- * [INTERNO] Bucle principal
- */
 async function _runNewsWorker() {
     while (isNewsWorkerRunning) {
         try {
+            // 0. LIMPIEZA PERIÓDICA DE ZOMBIES (Timeout)
+            // Si un bot murió a mitad de camino hace 30 mins, liberamos el slot.
+            await _resetStuckVideos(false);
+
             // 1. ¿Hay noticias en la fila?
             if (globalArticleQueue.length === 0) {
-                await sleep(60 * 1000); 
-                continue; 
+                // AQUÍ ESTÁ EL CAMBIO: SI NO HAY, BUSCAMOS.
+                // Ya no usamos CronJob. El worker pide comida cuando tiene hambre.
+                await runNewsAPIFetch();
+                
+                // Si después de buscar sigue vacía, dormimos un rato largo
+                if (globalArticleQueue.length === 0) {
+                    console.log("[News Worker] 💤 No hay noticias y el recolector no trajo nada. Durmiendo 5 min...");
+                    await sleep(5 * 60 * 1000); 
+                    continue;
+                }
             }
 
             // 2. --- EL FRENO DE MANO (SEMÁFORO) ---
-            // Contamos cuántos videos se están haciendo AHORA MISMO
             const activeVideos = await Article.countDocuments({ videoProcessingStatus: 'processing' });
             
-            // Si tenemos tantos videos activos como bots, ESPERAMOS.
-            // (Así no generamos noticias si no hay quien haga el video)
             if (activeVideos >= VIDEO_BOT_URLS.length) {
-                console.log(`[News Worker] ✋ Todos los bots (${activeVideos}/${VIDEO_BOT_URLS.length}) están ocupados. Esperando hueco...`);
-                await sleep(30 * 1000); // Esperar 30 segs y volver a chequear
-                continue; // Vuelve al inicio del while
+                // LOG MENOS MOLESTO (Solo avisamos si cambia estado o cada cierto tiempo)
+                // console.log(`[News Worker] ✋ Bots a tope (${activeVideos}/${VIDEO_BOT_URLS.length}). Esperando hueco...`);
+                await sleep(15 * 1000); // Chequear cada 15s es suficiente
+                continue; 
             }
 
-            // 3. ¡Hay hueco! Procesamos la siguiente noticia
+            // 3. ¡Hay hueco! Procesamos
             const articleToProcess = globalArticleQueue.shift(); 
-            console.log(`[News Worker] Procesando: ${articleToProcess.title}`);
+            console.log(`[News Worker] 🔨 Procesando: ${articleToProcess.title}`);
 
-            // 4. Generar solo Texto (Bedrock)
+            // 4. Generar Texto (Bedrock)
             const resultadoIA = await generateArticleContent(articleToProcess);
 
             if (resultadoIA && resultadoIA.articuloGenerado) {
                 const { categoria, tituloViral, articuloGenerado } = resultadoIA;
                 
-                // 5. Guardar en DB con IMAGEN ORIGINAL
                 const newArticle = new Article({
                     titulo: tituloViral || articleToProcess.title, 
                     descripcion: articleToProcess.description,
-                    imagen: articleToProcess.image, // <--- IMAGEN ORIGINAL DIRECTA
+                    imagen: articleToProcess.image, 
                     sitio: 'noticias.lat',
                     categoria: categoria,
                     pais: articleToProcess.paisLocal,
@@ -311,28 +339,23 @@ async function _runNewsWorker() {
                     fecha: new Date(articleToProcess.publishedAt),
                     articuloGenerado: articuloGenerado,
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending' // Pendiente de envío
+                    videoProcessingStatus: 'pending'
                 });
                 
                 await newArticle.save();
-                console.log(`[News Worker] Noticia guardada. Enviando a video...`);
-
-                // 6. Enviar a un Bot libre
-                await _triggerVideoBotWithRotation(newArticle);
                 
-                // NOTA: No publicamos en Telegram aquí. 
-                // Esperamos al Callback del video para publicar.
+                // 5. Enviar al Bot
+                await _triggerVideoBotWithRotation(newArticle);
                 
             } else {
                 console.warn(`[News Worker] Fallo IA Texto. Saltando.`);
             }
             
-            // Pequeña pausa de seguridad
-            await sleep(5000); 
+            await sleep(2000); 
 
         } catch (error) {
-            console.error(`[News Worker] Error: ${error.message}`);
-            await sleep(60 * 1000);
+            console.error(`[News Worker] Error Ciclo: ${error.message}`);
+            await sleep(30 * 1000);
         }
     }
 }
@@ -342,21 +365,16 @@ async function _runNewsWorker() {
 // PARTE 4: MANUAL Y SITEMAP
 // =========================================================================
 
-/**
- * [PRIVADO] Añadir artículo manual
- */
 exports.createManualArticle = async (req, res) => {
     try {
         const { titulo, enlaceOriginal, imagen } = req.body;
-        
-        // Texto IA
         const iaData = await generateArticleContent({ url: enlaceOriginal, title: titulo || "Manual" });
         if (!iaData) return res.status(500).json({ error: "Error IA Texto" });
 
         const newArticle = new Article({
             titulo: iaData.tituloViral, 
             descripcion: 'Manual',
-            imagen: imagen || 'https://via.placeholder.com/800x600', // Debe proveer imagen
+            imagen: imagen || 'https://via.placeholder.com/800x600',
             sitio: 'noticias.lat',
             enlaceOriginal: enlaceOriginal,
             articuloGenerado: iaData.articuloGenerado,
@@ -366,62 +384,31 @@ exports.createManualArticle = async (req, res) => {
         });
 
         await newArticle.save();
-        
-        // Enviar a video
         _triggerVideoBotWithRotation(newArticle);
-        
         res.status(201).json(newArticle);
     } catch (error) { 
         res.status(500).json({ error: error.message });
     }
 };
 
-/**
- * [PÚBLICO] Generar Sitemap
- */
 exports.getSitemap = async (req, res) => {
     const BASE_URL = 'https://noticias.lat';
-
     try {
-        const articles = await Article.find({sitio: 'noticias.lat'})
-            .sort({ fecha: -1 })
-            .select('_id fecha');
-
-        let xml = '<?xml version="1.0" encoding="UTF-8"?>';
-        xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
-
-        const staticPages = [
-            { loc: '', priority: '1.00', changefreq: 'daily' },
-            { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
-            { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
-        ];
-
-        staticPages.forEach(page => {
-            xml += '<url>';
-            xml += `<loc>${BASE_URL}/${page.loc}</loc>`;
-            xml += `<priority>${page.priority}</priority>`;
-            xml += `<changefreq>${page.changefreq}</changefreq>`;
-            xml += '</url>';
+        const articles = await Article.find({sitio: 'noticias.lat'}).sort({ fecha: -1 }).select('_id fecha');
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+        
+        ['', 'sobre-nosotros', 'contacto', 'politica-privacidad', 'terminos'].forEach(p => {
+            xml += `<url><loc>${BASE_URL}/${p}</loc><priority>0.8</priority></url>`;
         });
 
         articles.forEach(article => {
-            const articleDate = new Date(article.fecha).toISOString().split('T')[0];
-            xml += '<url>';
-            xml += `<loc>${BASE_URL}/articulo/${article._id}</loc>`;
-            xml += `<lastmod>${articleDate}</lastmod>`;
-            xml += '<changefreq>weekly</changefreq>';
-            xml += '<priority>0.90</priority>';
-            xml += '</url>';
+            const d = new Date(article.fecha).toISOString().split('T')[0];
+            xml += `<url><loc>${BASE_URL}/articulo/${article._id}</loc><lastmod>${d}</lastmod><priority>0.9</priority></url>`;
         });
-
         xml += '</urlset>';
         res.header('Content-Type', 'application/xml');
         res.send(xml);
-
     } catch (error) {
-        console.error("Error en getSitemap:", error);
-        res.status(500).json({ error: "Error interno del servidor." });
+        res.status(500).json({ error: "Error interno" });
     }
 };

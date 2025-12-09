@@ -6,7 +6,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
-const cron = require('node-cron'); // ¡Importamos el paquete cron!
+// NOTA: Eliminamos 'node-cron', ya no se necesita.
 
 // Importamos el "enrutador" principal
 const apiRoutes = require('./routes/index');
@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // =============================================
-// MIDDLEWARES (Tu config de CORS está perfecta)
+// MIDDLEWARES
 // =============================================
 const whiteList = [
     'https://lfaftechapi.onrender.com',
@@ -58,22 +58,17 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
       console.log('✅ Conectado a MongoDB Atlas (LFAFTechRed)');
       
-      // --- ¡AQUÍ ENCENDEMOS LOS ROBOTS AUTOMÁTICOS! ---
+      // --- ¡AQUÍ ENCENDEMOS EL ROBOT INTELIGENTE! ---
       
-      // 1. Inicia el robot UNIFICADO de Noticias (IA -> Telegram -> Pausa)
+      // Solo necesitamos llamar a esto. 
+      // El worker se encarga de:
+      // 1. Limpiar videos zombies.
+      // 2. Verificar si hay noticias.
+      // 3. Si no hay, ir a buscarlas (Fetch bajo demanda).
+      // 4. Gestionar los 3 bots de video.
       syncController.startNewsWorker();
       
-      // 2. Inicia el CRON JOB de 3 horas para el RECOLECTOR
-      console.log("Iniciando Cron Job de Recolección (cada 3 horas)...");
-      cron.schedule('0 */3 * * *', () => { // "Cada 3 horas"
-          console.log('[Cron Job Interno] ¡Disparado! Ejecutando recolección de noticias...');
-          // Llamamos a la función exportada
-          syncController.runNewsAPIFetch();
-      });
-
-      // 3. (Opcional) Ejecutar la recolección 1 vez al iniciar
-      console.log("[Inicio] Ejecutando recolección de noticias UNA VEZ al arrancar...");
-      syncController.runNewsAPIFetch();
+      console.log("🤖 Worker Maestro iniciado (Modo: Bajo Demanda + Anti-Zombies)");
       
   })
   .catch(err => console.error('❌ Error de conexión a MongoDB:', err));
@@ -86,7 +81,7 @@ app.use('/api', apiRoutes);
 // Ruta de bienvenida básica
 app.get('/', (req, res) => {
     res.json({
-        message: "Bienvenido a la API Central de LFAF Tech (v3.0 Escalable - WORKER UNIFICADO ACTIVO)",
+        message: "Bienvenido a la API Central de LFAF Tech (v3.1 - MULTI-BOT ON DEMAND)",
         status: "ok"
     });
 });
@@ -95,5 +90,5 @@ app.get('/', (req, res) => {
 // INICIAR SERVIDOR
 // =============================================
 app.listen(PORT, () => {
-    console.log(`🚀 API Central LFAF Tech (v3.0) corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 API Central LFAF Tech corriendo en http://localhost:${PORT}`);
 });
