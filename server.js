@@ -33,6 +33,7 @@ const whiteList = [
     'https://turadio.lat', 
     'https://www.tusinitusineli.com',
     'https://tusinitusineli.vercel.app/',
+    'https://tusinitusineli-34p6e1kjp-nando14s-projects.vercel.app',
     'https://tusinitusineli.com'
 ];
 
