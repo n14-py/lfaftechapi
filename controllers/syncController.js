@@ -11,7 +11,10 @@ const { generateArticleContent } = require('../utils/bedrockClient');
 const VIDEO_BOT_URLS = [
     process.env.VIDEO_BOT_URL_1,
     process.env.VIDEO_BOT_URL_2,
-    process.env.VIDEO_BOT_URL_3
+    process.env.VIDEO_BOT_URL_3,
+    process.env.VIDEO_BOT_URL_4,
+    process.env.VIDEO_BOT_URL_5,
+    process.env.VIDEO_BOT_URL_6
 ].filter(Boolean);
 
 const VIDEO_BOT_KEY = process.env.ADMIN_API_KEY; 
