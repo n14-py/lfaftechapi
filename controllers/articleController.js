@@ -1,9 +1,12 @@
 // Archivo: lfaftechapi/controllers/articleController.js
-// --- VERSIÓN: CALLBACK QUE DETONA TELEGRAM ---
+// --- VERSIÓN: CALLBACK QUE DETONA TELEGRAM + REPORTE DE CUOTA ---
 
 const mongoose = require('mongoose');
 const Article = require('../models/article');
-const { publicarUnArticulo } = require('../utils/telegramBot'); // <--- IMPORTANTE: Importamos esto aquí
+const { publicarUnArticulo } = require('../utils/telegramBot'); 
+
+// --- IMPORTANTE: TRAEMOS LA FUNCIÓN DE ALERTA DEL SYNCCONTROLLER ---
+const { reportQuotaLimitReached } = require('./syncController');
 
 // Mapeo inteligente de países para búsqueda
 const paisTermMap = {
@@ -241,9 +244,18 @@ exports.videoFailedCallback = async (req, res) => {
         const article = await Article.findById(articleId);
         if (!article) return res.status(404).json({ error: "Artículo no encontrado" });
 
+        // ==================================================================
+        // 🚨 NUEVO: DETECCIÓN DE CUOTA AGOTADA
+        // Si el mensaje de error de YouTube contiene "quota" o "limit",
+        // avisamos al syncController para que deje de generar textos.
+        // ==================================================================
+        if (error && (error.toLowerCase().includes('quota') || error.toLowerCase().includes('limit'))) {
+             console.error("⛔ [CALLBACK] DETECTADA CUOTA AGOTADA. ACTIVANDO FRENO DE MANO.");
+             reportQuotaLimitReached(); // <--- ESTO ACTIVA EL FRENO
+        }
+
         // Marcar como fallido.
         // NOTA: Al quedar en 'failed', el semáforo del worker sabrá que este slot se liberó
-        // y podrá procesar otra noticia.
         article.videoProcessingStatus = 'failed';
         await article.save();
         

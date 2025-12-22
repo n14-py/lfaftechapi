@@ -1,5 +1,5 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- VERSIÓN: GESTIÓN DE ZOMBIES + PING DESPERTADOR + FETCH BAJO DEMANDA ---
+// --- VERSIÓN: GESTIÓN DE ZOMBIES + PING DESPERTADOR + PROTECCIÓN DE CRÉDITO IA ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -24,6 +24,10 @@ let currentBotIndex = 0;
 // --- Configuración de Recolección ---
 const MAX_ARTICLES_PER_COUNTRY = 10;
 const TIMEOUT_ZOMBIES_MINUTES = 30; // Si tarda más de 30 min, lo consideramos muerto y liberamos el slot
+
+// --- NUEVO: INTERRUPTOR DE SEGURIDAD (CUOTA AGOTADA) ---
+// Si esto es true, el sistema DEJA DE GASTAR dinero en la IA.
+let isQuotaExhausted = false;
 
 const paisNewsDataMap = {
     "argentina": "ar", "bolivia": "bo", "brazil": "br", "chile": "cl", 
@@ -62,17 +66,24 @@ let currentGNewsKeyIndex = 0;
 let currentNewsDataKeyIndex = 0;
 
 // =========================================================================
-// HELPER: RESETEAR ZOMBIES (IMPORTANTE PARA TU PROBLEMA)
+// NUEVO: FUNCIÓN PARA REPORTAR CUOTA AGOTADA
+// (Esta función será llamada desde articleController.js cuando YouTube diga "Basta")
 // =========================================================================
-/**
- * Busca videos que quedaron en 'processing' por error (reinicio del server, crash)
- * y los devuelve a 'pending' para que no ocupen espacio fantasma.
- */
+exports.reportQuotaLimitReached = () => {
+    if (!isQuotaExhausted) {
+        isQuotaExhausted = true;
+        console.error("🚨 [SEGURIDAD] Se detectó CUOTA AGOTADA en YouTube.");
+        console.error("🛑 [SEGURIDAD] Se ha PAUSADO la generación de textos para no gastar crédito.");
+    }
+};
+
+// =========================================================================
+// HELPER: RESETEAR ZOMBIES
+// =========================================================================
 async function _resetStuckVideos(forceAll = false) {
     try {
         let filtro = { videoProcessingStatus: 'processing' };
         
-        // Si no forzamos todos, solo buscamos los que llevan mucho tiempo bloqueados (timeout)
         if (!forceAll) {
             const timeLimit = new Date(Date.now() - TIMEOUT_ZOMBIES_MINUTES * 60 * 1000);
             filtro.updatedAt = { $lt: timeLimit };
@@ -80,7 +91,7 @@ async function _resetStuckVideos(forceAll = false) {
 
         const result = await Article.updateMany(
             filtro,
-            { $set: { videoProcessingStatus: 'pending' } } // Los devolvemos a la fila
+            { $set: { videoProcessingStatus: 'pending' } } 
         );
 
         if (result.modifiedCount > 0) {
@@ -92,17 +103,14 @@ async function _resetStuckVideos(forceAll = false) {
 }
 
 // =========================================================================
-// HELPER: PING DESPERTADOR (Wake up Render)
+// HELPER: PING DESPERTADOR
 // =========================================================================
 async function _wakeUpBot(url) {
     console.log(`[Ping] Despertando bot: ${url} ...`);
     try {
-        // Timeout corto de 5s, solo queremos ver si responde o forzar que Render lo arranque
         await axios.get(url, { timeout: 5000 });
         return true;
     } catch (e) {
-        // Incluso si da error 404 (porque quizás no hay ruta GET /), significa que el server respondió
-        // Si es timeout, es que se está despertando.
         console.log(`[Ping] Bot ${url} contactado (Status: ${e.response?.status || 'No response'}).`);
         return true;
     }
@@ -114,6 +122,13 @@ async function _wakeUpBot(url) {
 // =========================================================================
 const runNewsAPIFetch = async () => {
     if (isFetchWorkerRunning) return;
+    
+    // SI LA CUOTA ESTÁ AGOTADA, NO TRAEMOS NADA NUEVO PARA NO ACUMULAR
+    if (isQuotaExhausted) {
+        console.log("(Recolector) ⏸️ Sistema en pausa por Cuota. Saltando búsqueda.");
+        return;
+    }
+
     isFetchWorkerRunning = true;
     currentGNewsKeyIndex = 0;
     currentNewsDataKeyIndex = 0;
@@ -237,7 +252,6 @@ async function _triggerVideoBotWithRotation(article) {
         await articleCheck.save();
 
         // 2. ¡DESPERTAR AL BOT! (Ping)
-        // Esto evita errores de timeout si Render lo durmió
         await _wakeUpBot(targetBotUrl);
 
         // 3. Payload
@@ -252,14 +266,13 @@ async function _triggerVideoBotWithRotation(article) {
         console.log(`[VideoBot] Enviando tarea a ${targetBotUrl}...`);
         await axios.post(`${targetBotUrl}/generate_video`, payload, { 
             headers: { 'x-api-key': VIDEO_BOT_KEY },
-            timeout: 10000 // Timeout corto para el handshake
+            timeout: 10000 
         });
 
         console.log(`[VideoBot] 🚀 Tarea aceptada por el bot.`);
 
     } catch (error) {
         console.error(`[VideoBot] ❌ Error conectando con Bot: ${error.message}`);
-        // Si falló la conexión, devolvemos a 'pending' para que otro bot (o el mismo más tarde) lo intente
         articleCheck.videoProcessingStatus = 'pending';
         await articleCheck.save();
     }
@@ -281,8 +294,6 @@ exports.startNewsWorker = async () => {
     console.log(`[News Worker] 🟢 INICIANDO SISTEMA...`);
     
     // --- LIMPIEZA INICIAL ---
-    // Reseteamos TODO lo que quedó "processing" al reiniciar el server
-    // Esto arregla el bug de "3/3 ocupados" al instante.
     await _resetStuckVideos(true); 
 
     isNewsWorkerRunning = true;
@@ -292,31 +303,36 @@ exports.startNewsWorker = async () => {
 async function _runNewsWorker() {
     while (isNewsWorkerRunning) {
         try {
-            // 0. LIMPIEZA PERIÓDICA DE ZOMBIES (Timeout)
-            // Si un bot murió a mitad de camino hace 30 mins, liberamos el slot.
+            // 0. LIMPIEZA PERIÓDICA
             await _resetStuckVideos(false);
+
+            // ==============================================================
+            // 🔴 PROTECCIÓN ABSOLUTA DE CRÉDITO
+            // Si la cuota está agotada, simplemente esperamos 1 minuto y volvemos a preguntar.
+            // NO dormimos el servidor, pero NO ejecutamos el código que gasta dinero.
+            // ==============================================================
+            if (isQuotaExhausted) {
+                console.log(`[News Worker] 🛑 PAUSA DE SEGURIDAD: Cuota agotada. Esperando 1 min...`);
+                await sleep(60 * 1000); // 1 minuto de espera
+                continue; // Volvemos al inicio del while, SIN pasar por Bedrock
+            }
 
             // 1. ¿Hay noticias en la fila?
             if (globalArticleQueue.length === 0) {
-                // AQUÍ ESTÁ EL CAMBIO: SI NO HAY, BUSCAMOS.
-                // Ya no usamos CronJob. El worker pide comida cuando tiene hambre.
                 await runNewsAPIFetch();
                 
-                // Si después de buscar sigue vacía, dormimos un rato largo
                 if (globalArticleQueue.length === 0) {
-                    console.log("[News Worker] 💤 No hay noticias y el recolector no trajo nada. Durmiendo 5 min...");
+                    console.log("[News Worker] 💤 Sin noticias. Durmiendo 5 min...");
                     await sleep(5 * 60 * 1000); 
                     continue;
                 }
             }
 
-            // 2. --- EL FRENO DE MANO (SEMÁFORO) ---
+            // 2. --- SEMÁFORO DE BOTS ---
             const activeVideos = await Article.countDocuments({ videoProcessingStatus: 'processing' });
             
             if (activeVideos >= VIDEO_BOT_URLS.length) {
-                // LOG MENOS MOLESTO (Solo avisamos si cambia estado o cada cierto tiempo)
-                // console.log(`[News Worker] ✋ Bots a tope (${activeVideos}/${VIDEO_BOT_URLS.length}). Esperando hueco...`);
-                await sleep(15 * 1000); // Chequear cada 15s es suficiente
+                await sleep(15 * 1000); 
                 continue; 
             }
 
@@ -324,7 +340,10 @@ async function _runNewsWorker() {
             const articleToProcess = globalArticleQueue.shift(); 
             console.log(`[News Worker] 🔨 Procesando: ${articleToProcess.title}`);
 
-            // 4. Generar Texto (Bedrock)
+            // ==============================================================
+            // 💰 ZONA DE GASTO (BEDROCK)
+            // Solo llegamos aquí si isQuotaExhausted es FALSE
+            // ==============================================================
             const resultadoIA = await generateArticleContent(articleToProcess);
 
             if (resultadoIA && resultadoIA.articuloGenerado) {
@@ -369,6 +388,11 @@ async function _runNewsWorker() {
 // =========================================================================
 
 exports.createManualArticle = async (req, res) => {
+    // También bloqueamos la creación manual si no hay cuota, para proteger tu dinero
+    if (isQuotaExhausted) {
+        return res.status(503).json({ error: "🛑 SISTEMA EN PAUSA: La cuota de YouTube se ha agotado." });
+    }
+
     try {
         const { titulo, enlaceOriginal, imagen } = req.body;
         const iaData = await generateArticleContent({ url: enlaceOriginal, title: titulo || "Manual" });
