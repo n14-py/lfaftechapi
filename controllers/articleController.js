@@ -127,39 +127,7 @@ exports.getRecommendedArticles = async (req, res) => {
 /**
  * [PÚBLICO] Sitemap
  */
-exports.getSitemap = async (req, res) => {
-    const BASE_URL = 'https://noticias.lat'; 
-    try {
-        const articles = await Article.find({ sitio: 'noticias.lat' }).sort({ fecha: -1 }).select('_id fecha');
-        
-        let xml = '<?xml version="1.0" encoding="UTF-8"?>';
-        xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
 
-        const staticPages = [
-            { loc: '', priority: '1.00', changefreq: 'daily' }, 
-            { loc: 'sobre-nosotros', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'contacto', priority: '0.80', changefreq: 'monthly' },
-            { loc: 'politica-privacidad', priority: '0.50', changefreq: 'yearly' },
-            { loc: 'terminos', priority: '0.50', changefreq: 'yearly' },
-        ];
-
-        staticPages.forEach(page => {
-            xml += `<url><loc>${BASE_URL}/${page.loc}</loc><priority>${page.priority}</priority><changefreq>${page.changefreq}</changefreq></url>`;
-        });
-
-        articles.forEach(article => {
-            const articleDate = new Date(article.fecha).toISOString().split('T')[0];
-            xml += `<url><loc>${BASE_URL}/articulo/${article._id}</loc><lastmod>${articleDate}</lastmod><changefreq>weekly</changefreq><priority>0.90</priority></url>`;
-        });
-
-        xml += '</urlset>';
-        res.header('Content-Type', 'application/xml');
-        res.send(xml);
-    } catch (error) {
-        console.error("Error en getSitemap:", error);
-        res.status(500).json({ error: "Error interno." });
-    }
-};
 
 /**
  * [PÚBLICO] Feed de Videos (Solo completos)

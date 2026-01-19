@@ -418,24 +418,3 @@ exports.createManualArticle = async (req, res) => {
     }
 };
 
-exports.getSitemap = async (req, res) => {
-    const BASE_URL = 'https://noticias.lat';
-    try {
-        const articles = await Article.find({sitio: 'noticias.lat'}).sort({ fecha: -1 }).select('_id fecha');
-        let xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
-        
-        ['', 'sobre-nosotros', 'contacto', 'politica-privacidad', 'terminos'].forEach(p => {
-            xml += `<url><loc>${BASE_URL}/${p}</loc><priority>0.8</priority></url>`;
-        });
-
-        articles.forEach(article => {
-            const d = new Date(article.fecha).toISOString().split('T')[0];
-            xml += `<url><loc>${BASE_URL}/articulo/${article._id}</loc><lastmod>${d}</lastmod><priority>0.9</priority></url>`;
-        });
-        xml += '</urlset>';
-        res.header('Content-Type', 'application/xml');
-        res.send(xml);
-    } catch (error) {
-        res.status(500).json({ error: "Error interno" });
-    }
-};

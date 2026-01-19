@@ -63,7 +63,7 @@ const requireAdminKey = (req, res, next) => {
 // =============================================
 
 // GET /api/sitemap.xml (SEO)
-router.get('/sitemap.xml', articleController.getSitemap);
+
 
 // GET /api/articles/recommended (Recomendaciones)
 // (Sin caché para que varíen más)
