@@ -22,7 +22,7 @@ const client = new BedrockRuntimeClient({
 exports.client = client; 
 exports.InvokeModelCommand = InvokeModelCommand;
 
-const MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
+const MODEL_ID = 'us.anthropic.claude-3-haiku-20240307-v1:0';
 
 
 // ============================================================================
