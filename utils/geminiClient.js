@@ -7,10 +7,9 @@ const cheerio = require('cheerio');
 // --- 1. Configuración de Gemini ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Usamos el modelo Flash, que es rápido y eficiente para noticias
+// USAREMOS 'gemini-pro'. ES EL MODELO ESTÁNDAR Y ESTABLE DEL PLAN GRATUITO.
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash-001",
-    // Configuración de seguridad laxa para permitir noticias de crímenes/política sin censura excesiva
+    model: "gemini-pro", // <--- CAMBIO CLAVE AQUÍ
     safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -20,7 +19,7 @@ const model = genAI.getGenerativeModel({
 });
 
 // ============================================================================
-// 🛠️ HELPERS (Mismos que tenías en Bedrock)
+// 🛠️ HELPERS (Limpieza y Scraping)
 // ============================================================================
 
 function cleanCategory(rawCategory) {
@@ -35,8 +34,9 @@ function cleanCategory(rawCategory) {
 
 async function fetchUrlContent(url) {
     try {
+        // Timeout de 15 segundos para asegurar lectura
         const { data } = await axios.get(url, { 
-            timeout: 10000,
+            timeout: 15000,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
         });
         const $ = cheerio.load(data);
@@ -71,30 +71,33 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    // 2. Prompt (Adaptado de tu versión Bedrock)
+    // 2. Prompt Optimizado para Gemini Pro
     const prompt = `
-    Eres un Periodista Senior. Redacta la noticia completa basada en la siguiente información.
+    Actúa como un Periodista de renombre. Redacta una noticia completa en español basada en:
     
     ${promptContexto}
 
-    --- REQUISITOS ---
-    1. EXTENSIÓN: Mínimo 800 palabras. Usa párrafos cortos.
-    2. ESTILO: Periodístico, objetivo, formal pero ágil.
-    3. FORMATO DE SALIDA EXACTO (Respeta los saltos de línea):
-    LÍNEA 1: [Categoría (politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general)]
-    LÍNEA 2: TÍTULO VIRAL: [Título atractivo]
-    LÍNEA 3: TEXTO IMAGEN: [Frase de 3 a 6 palabras para la miniatura, SIN terminar en preposición]
-    LÍNEA 4: [Cuerpo del artículo completo...]
+    --- INSTRUCCIONES ESTRICTAS ---
+    1. EXTENSIÓN: Mínimo 800 palabras.
+    2. ESTILO: Formal, objetivo y periodístico.
+    3. IMPORTANTE: Genera la respuesta EXACTAMENTE con este formato de 4 líneas (sin markdown, sin negritas en los encabezados):
+
+    [Categoría (una de: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general)]
+    TÍTULO VIRAL: [Título atractivo aquí]
+    TEXTO IMAGEN: [Frase corta de 3 a 6 palabras, NO termines en preposición como 'de', 'a', 'en']
+    [Aquí comienza el cuerpo del artículo completo...]
     `;
 
     try {
         const result = await model.generateContent(prompt);
-        const fullText = result.response.text().trim();
+        const response = await result.response;
+        const fullText = response.text().trim();
         
         const lines = fullText.split('\n').filter(line => line.trim() !== '');
 
+        // Validación de formato
         if (lines.length < 4) {
-             console.warn("[Gemini] Respuesta corta o formato inválido. Usando fallback.");
+             console.warn("[Gemini] Respuesta con formato inesperado. Usando modo seguro.");
              return { 
                  categoria: "general", 
                  tituloViral: title, 
@@ -107,14 +110,15 @@ exports.generateArticleContent = async (article) => {
         let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
         let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
         
-        // Limpieza de seguridad del texto imagen (igual que en tu bedrockClient)
-        if (textoImagen.length > 50 || textoImagen.length < 5) {
+        // Limpieza de seguridad del texto imagen
+        if (textoImagen.length > 60 || textoImagen.length < 5 || textoImagen.includes(":")) {
+             // Si falló la generación de la frase corta, usamos parte del título
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
         const articuloGenerado = lines.slice(3).join('\n').trim();
 
-        console.log(`[Gemini] ✅ Noticia generada: "${tituloViral.substring(0,30)}..."`);
+        console.log(`[Gemini] ✅ Éxito: "${tituloViral.substring(0,30)}..."`);
         
         return {
             categoriaSugerida: categoria, 
@@ -125,16 +129,22 @@ exports.generateArticleContent = async (article) => {
         };
 
     } catch (error) {
-        console.error(`Error Gemini News:`, error.message);
+        // Manejo de errores detallado
+        console.error(`[ERROR FATAL GEMINI]`);
+        console.error(`Mensaje: ${error.message}`);
+        // Si el error es por filtros de seguridad, lo indicamos
+        if (error.response && error.response.promptFeedback) {
+            console.error("Bloqueo de seguridad:", error.response.promptFeedback);
+        }
         return null;
     }
 };
 
 // ============================================================================
-// 📻 GENERADOR DE RADIOS (Opcional, si usas la función de syncRadios)
+// 📻 GENERADOR DE RADIOS
 // ============================================================================
 exports.generateRadioDescription = async (radio) => {
-    const prompt = `Escribe una descripción SEO creativa y extensa (600 palabras) para la radio "${radio.nombre}" de ${radio.pais}. Géneros: ${radio.generos}. Inventa una historia sobre su impacto cultural si no tienes datos.`;
+    const prompt = `Escribe una descripción SEO creativa (600 palabras) para la radio "${radio.nombre}" de ${radio.pais}. Géneros: ${radio.generos}.`;
     try {
         const result = await model.generateContent(prompt);
         return result.response.text().trim();
@@ -142,14 +152,10 @@ exports.generateRadioDescription = async (radio) => {
 };
 
 // ============================================================================
-// 🎨 GENERADOR DE PROMPT IMAGEN (Para SDXL)
+// 🎨 GENERADOR DE PROMPT IMAGEN (SDXL)
 // ============================================================================
 exports.generateImagePrompt = async (title, content) => {
-    const prompt = `You are an AI Art Director. Create a single SDXL prompt in English for this news: "${title}". 
-    Style: Photorealistic, 8k, cinematic lighting, press photography. 
-    Context: ${content.substring(0, 200)}. 
-    Output: ONLY the prompt string.`;
-    
+    const prompt = `Create a single SDXL prompt in English for news: "${title}". Style: Photorealistic, 8k, cinematic lighting. Output ONLY the prompt string.`;
     try {
         const result = await model.generateContent(prompt);
         return result.response.text().replace(/^Prompt:/i, '').trim();
