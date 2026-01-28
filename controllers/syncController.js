@@ -5,7 +5,7 @@ const axios = require('axios');
 const Article = require('../models/article');
 
 // 1. IMPORTAMOS SOLO LA IA DE TEXTO
-const { generateArticleContent } = require('../utils/bedrockClient');
+const { generateArticleContent } = require('../utils/geminiClient');
 
 // --- CONFIGURACIÓN DE MULTI-BOTS ---
 const VIDEO_BOT_URLS = [
