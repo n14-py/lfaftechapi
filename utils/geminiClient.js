@@ -9,7 +9,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // USAREMOS 'gemini-pro'. ES EL MODELO ESTÁNDAR Y ESTABLE DEL PLAN GRATUITO.
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-pro", // <--- CAMBIO CLAVE AQUÍ
+    model: "gemini-2.5-flash", // <--- CAMBIO CLAVE AQUÍ
     safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
