@@ -5,14 +5,23 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 // ============================================================================
-// 🔐 GESTIÓN DE CLAVES ROTATIVAS (MULTI-CUENTA)
+// 🔐 GESTIÓN DE CLAVES ROTATIVAS (MULTI-CUENTA INDIVIDUAL)
 // ============================================================================
 
-// 1. Cargamos todas las keys separadas por coma
-const apiKeys = process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [];
+// 1. Cargamos las keys UNA POR UNA (Más seguro que split por comas)
+const RAW_KEYS = [
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY_4,
+    process.env.GEMINI_API_KEY_5
+];
+
+// Filtramos para quitar las que estén vacías o undefined
+const apiKeys = RAW_KEYS.filter(key => key && key.trim().length > 10);
 
 if (apiKeys.length === 0) {
-    console.error("❌ [Gemini Manager] FATAL: No hay claves en .env (variable GEMINI_API_KEYS)");
+    console.error("❌ [Gemini Manager] FATAL: No hay claves en .env (GEMINI_API_KEY, _2, _3...)");
 } else {
     console.log(`✅ [Gemini Manager] Cargadas ${apiKeys.length} cuentas de API para rotación.`);
 }
@@ -21,12 +30,15 @@ let currentKeyIndex = 0;
 
 // Función para obtener el modelo con la clave actual
 function getModel() {
+    // Protección por si no hay keys
+    if (apiKeys.length === 0) throw new Error("No API Keys available");
+
     const currentKey = apiKeys[currentKeyIndex];
     const genAI = new GoogleGenerativeAI(currentKey);
     
-    // Usamos el modelo 2.5 Flash que es el mejor actualmente para esto
+    // Usamos el modelo 2.5 Flash (o 1.5-flash si prefieres)
     return genAI.getGenerativeModel({ 
-        model: "gemini-2.5-flash", 
+        model: "gemini-1.5-flash", // Recomiendo 1.5-flash por estabilidad en free tier
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -38,6 +50,7 @@ function getModel() {
 
 // Función para rotar la clave si se agota la cuota
 function rotateKey() {
+    if (apiKeys.length <= 1) return; // No rotar si solo hay una
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
     console.log(`🔄 [Gemini Manager] Cambiando a API Key #${currentKeyIndex + 1} por límite de cuota.`);
 }
@@ -83,11 +96,15 @@ async function generateContentWithRetry(prompt, retries = 0) {
         const result = await model.generateContent(prompt);
         return result.response.text();
     } catch (error) {
-        // Detectar error 429 (Too Many Requests) o errores de cuota
-        const isQuotaError = error.message.includes("429") || error.message.includes("Quota exceeded") || error.message.includes("Resource has been exhausted");
+        // Detectar error 429 (Too Many Requests), 400 (Bad Request/Key) o errores de cuota
+        const isQuotaError = error.message.includes("429") || 
+                             error.message.includes("Quota exceeded") || 
+                             error.message.includes("Resource has been exhausted") ||
+                             error.message.includes("API key not valid") || 
+                             error.message.includes("400"); // Agregué 400 por si acaso
 
         if (isQuotaError) {
-            console.warn(`⛔ [Gemini] Cuota excedida en Key #${currentKeyIndex + 1}.`);
+            console.warn(`⛔ [Gemini] Fallo en Key #${currentKeyIndex + 1} (Status: ${error.status || 'Quota/Auth'}).`);
             
             // Si tenemos más claves y no hemos dado la vuelta completa a todas las claves
             if (retries < apiKeys.length) {
@@ -109,7 +126,7 @@ async function generateContentWithRetry(prompt, retries = 0) {
 exports.generateArticleContent = async (article) => {
     const { url, title, description } = article; 
 
-    // 1. Obtener contexto
+    // 1. Obtener contexto (Scraping)
     let contenidoReal = null;
     if (url && url.startsWith('http')) {
         // console.log(`[GeminiClient] Leyendo: ${title.substring(0, 20)}...`);
