@@ -392,7 +392,7 @@ async function _runNewsWorker() {
                      await _triggerVideoBotWithRotation(retryArticle);
                 }
 
-                await sleep(30 * 1000); // Espera 30s antes de volver a chequear
+                await sleep(10 * 1000);
                 continue;
             }
 
