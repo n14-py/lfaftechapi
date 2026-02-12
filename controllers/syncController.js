@@ -11,7 +11,7 @@ const { generateArticleContent } = require('../utils/geminiClient');
 // ============================================================================
 const VIDEO_BOT_URLS = [
     "http://18.218.177.159:5000",
-    "https://tts-fmpeg-lfaf1.onrender.com"
+    "http://3.15.176.240:3001"
 ];
 
 // Clave para comunicar con los bots (si la usan)
