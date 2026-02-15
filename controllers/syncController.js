@@ -1,5 +1,5 @@
 // Archivo: lfaftechapi/controllers/syncController.js
-// --- VERSIÓN: ULTIMATE (APIs Originales + Buffer Inteligente + Gestión de Zombies + Multi-Bot) ---
+// --- VERSIÓN: ULTIMATE (APIs Originales + Buffer Inteligente + Gestión de Zombies + Multi-Bot + FIX DUPLICADOS) ---
 
 const axios = require('axios');
 const Article = require('../models/article');
@@ -279,11 +279,23 @@ async function _triggerVideoBotWithRotation(article) {
         return;
     }
 
-    // Buscamos el artículo actualizado
-    const articleCheck = await Article.findById(article._id);
-    if (!articleCheck) return;
+    // 🔥🔥🔥 FIX DUPLICADOS: BLOQUEO ATÓMICO 🔥🔥🔥
+    // Intentamos "reservar" la noticia. Si 'videoProcessingStatus' es 'pending',
+    // lo pasamos a 'processing' y obtenemos el documento.
+    // Si ya NO estaba en 'pending' (porque el otro servidor la tomó), nos devuelve null.
+    const articleReserved = await Article.findOneAndUpdate(
+        { _id: article._id, videoProcessingStatus: 'pending' }, // Condición: Debe estar libre
+        { $set: { videoProcessingStatus: 'processing' } },      // Acción: Marcar ocupada
+        { new: true } // Opción: Devolver el documento actualizado
+    );
 
-    // Intentamos con hasta 3 bots diferentes si el primero falla
+    // Si articleReserved es null, significa que llegamos tarde y alguien más la está haciendo.
+    if (!articleReserved) {
+        // console.log(`[VideoBot] 🔒 Noticia ${article._id} ya tomada por otro worker. Saltando.`);
+        return; 
+    }
+
+    // A partir de aquí, usamos 'articleReserved' que es la versión segura y bloqueada.
     let attempts = 0;
     let sent = false;
 
@@ -298,11 +310,11 @@ async function _triggerVideoBotWithRotation(article) {
 
             // Preparar Payload
             const payload = {
-                text: articleCheck.articuloGenerado, 
-                title: articleCheck.titulo,            
-                image_url: articleCheck.imagen, 
-                article_id: articleCheck._id,
-                category: articleCheck.categoria // Dato extra útil
+                text: articleReserved.articuloGenerado, 
+                title: articleReserved.titulo,            
+                image_url: articleReserved.imagen, 
+                article_id: articleReserved._id,
+                category: articleReserved.categoria // Dato extra útil
             };
 
             console.log(`[VideoBot] 📡 Enviando tarea a ${targetBotUrl} (Intento ${attempts+1})...`);
@@ -315,10 +327,7 @@ async function _triggerVideoBotWithRotation(article) {
 
             if (response.status === 200) {
                 console.log(`[VideoBot] ✅ Tarea aceptada por ${targetBotUrl}.`);
-                
-                // Actualizar estado en DB
-                articleCheck.videoProcessingStatus = 'processing';
-                await articleCheck.save();
+                // Ya la marcamos como 'processing' antes, así que todo perfecto.
                 sent = true;
             }
 
@@ -331,8 +340,13 @@ async function _triggerVideoBotWithRotation(article) {
     }
 
     if (!sent) {
-        console.error(`[VideoBot] ❌ Ningún bot aceptó la tarea. Se queda en 'pending' para luego.`);
-        // No cambiamos el estado, se queda en pending para que el worker lo retome
+        console.error(`[VideoBot] ❌ Ningún bot aceptó la tarea. Liberando noticia.`);
+        // IMPORTANTE: Si fallamos en enviar, devolvemos el estado a 'pending' 
+        // para que se intente de nuevo en el siguiente ciclo.
+        await Article.updateOne(
+            { _id: articleReserved._id },
+            { $set: { videoProcessingStatus: 'pending' } }
+        );
     }
 }
 
@@ -385,8 +399,7 @@ async function _runNewsWorker() {
                 // (Buscamos una vieja que no se haya enviado)
                 const retryArticle = await Article.findOne({ 
                     videoProcessingStatus: 'pending',
-                    telegramPosted: false // Usamos este flag como "video completado" en tu lógica original?
-                    // Ajusta según tu lógica, asumo que pending es que le falta video.
+                    telegramPosted: false 
                 }).sort({ createdAt: 1 });
 
                 if (retryArticle) {
