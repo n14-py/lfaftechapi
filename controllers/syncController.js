@@ -273,15 +273,30 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 // 🤖 6. EL GESTOR DE BOTS (DISPATCHER)
 // ============================================================================
 
+// ============================================================================
+// 🤖 6. EL GESTOR DE BOTS (DISPATCHER)
+// ============================================================================
+
 async function _triggerVideoBotWithRotation(article) {
     if (VIDEO_BOT_URLS.length === 0) {
         console.warn(`[VideoBot] ❌ ERROR: No hay URLs de bots configuradas.`);
         return;
     }
 
-    // Buscamos el artículo actualizado
-    const articleCheck = await Article.findById(article._id);
-    if (!articleCheck) return;
+    // --- LA MAGIA: BLOQUEO ATÓMICO ---
+    // Busca la noticia SÓLO si está en 'pending' y le pone 'processing' al instante.
+    // Si otro bot ya la agarró un milisegundo antes, esto devuelve null y se cancela.
+    const articleCheck = await Article.findOneAndUpdate(
+        { _id: article._id, videoProcessingStatus: 'pending' },
+        { $set: { videoProcessingStatus: 'processing' } },
+        { new: true }
+    );
+
+    // Si es null, otro bot ya se la llevó. No hacemos nada.
+    if (!articleCheck) {
+        console.log(`[VideoBot] ⏭️ La noticia ya fue tomada por otro bot. Ignorando duplicado.`);
+        return;
+    }
 
     // Intentamos con hasta 3 bots diferentes si el primero falla
     let attempts = 0;
@@ -293,21 +308,18 @@ async function _triggerVideoBotWithRotation(article) {
         currentBotIndex = (currentBotIndex + 1) % VIDEO_BOT_URLS.length;
 
         try {
-            // Verificar si el bot está vivo (Ping)
             await _wakeUpBot(targetBotUrl);
 
-            // Preparar Payload
             const payload = {
                 text: articleCheck.articuloGenerado, 
                 title: articleCheck.titulo,            
                 image_url: articleCheck.imagen, 
                 article_id: articleCheck._id,
-                category: articleCheck.categoria // Dato extra útil
+                category: articleCheck.categoria
             };
 
             console.log(`[VideoBot] 📡 Enviando tarea a ${targetBotUrl} (Intento ${attempts+1})...`);
             
-            // Enviar trabajo (Timeout 10s)
             const response = await axios.post(`${targetBotUrl}/generate_video`, payload, { 
                 headers: { 'x-api-key': VIDEO_BOT_KEY },
                 timeout: 10000 
@@ -315,10 +327,7 @@ async function _triggerVideoBotWithRotation(article) {
 
             if (response.status === 200) {
                 console.log(`[VideoBot] ✅ Tarea aceptada por ${targetBotUrl}.`);
-                
-                // Actualizar estado en DB
-                articleCheck.videoProcessingStatus = 'processing';
-                await articleCheck.save();
+                // Ya la marcamos como processing arriba, no hace falta guardar de nuevo.
                 sent = true;
             }
 
@@ -331,8 +340,10 @@ async function _triggerVideoBotWithRotation(article) {
     }
 
     if (!sent) {
-        console.error(`[VideoBot] ❌ Ningún bot aceptó la tarea. Se queda en 'pending' para luego.`);
-        // No cambiamos el estado, se queda en pending para que el worker lo retome
+        console.error(`[VideoBot] ❌ Ningún bot aceptó la tarea. Volviendo a 'pending' para luego.`);
+        // Si ningún bot pudo, le quitamos el candado para que se intente más tarde.
+        articleCheck.videoProcessingStatus = 'pending';
+        await articleCheck.save();
     }
 }
 
