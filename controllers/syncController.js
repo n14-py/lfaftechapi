@@ -10,8 +10,7 @@ const { generateArticleContent } = require('../utils/geminiClient');
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 1 es short
 // ============================================================================
 const VIDEO_BOT_URLS = [
-    "http://18.188.34.160:3001",
-    "http://3.15.176.240:3001"
+    "https://tts-fmpeg-lfaf-1.onrender.com/"
 ];
 
 // Clave para comunicar con los bots (si la usan)
