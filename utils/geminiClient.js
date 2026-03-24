@@ -141,18 +141,29 @@ exports.generateArticleContent = async (article) => {
     }
 
     // 2. Prompt (Optimizado para que no falle el formato)
-    const prompt = `
-    Actúa como un Periodista Senior. Escribe una noticia basada en:
-    ${promptContexto}
+const prompt = `
+Actúa como un Periodista Senior. Escribe una noticia basada en:
+${promptContexto}
 
-    --- REGLAS ESTRICTAS DE SALIDA ---
-    Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
-    
-    Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
-    Línea 2: TÍTULO VIRAL: [Título clickbait pero serio]
-    Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
-    Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
-    `;
+--- REGLAS ESTRICTAS DE CONTENIDO ---
+- NO inventar información
+- NO agregar datos que no estén en el texto original
+- NO crear citas falsas
+- Mantener el mismo significado y hechos del contenido original
+- Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
+- Redacción clara, informativa y coherente
+
+--- REGLAS ESTRICTAS DE SALIDA ---
+Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
+
+Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
+
+Línea 2: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
+
+Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
+
+Línea 4: [Cuerpo de la noticia completo, mínimo 500 palabras...]
+`;
 
     try {
         // LLAMADA CON SISTEMA DE ROTACIÓN
