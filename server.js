@@ -13,6 +13,8 @@ const apiRoutes = require('./routes/index');
 
 // --- Importamos los controladores de workers ---
 const syncController = require('./controllers/syncController');
+const syncShortsController = require('./controllers/syncShortsController');
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,7 +72,8 @@ mongoose.connect(process.env.MONGODB_URI)
       // 3. Si no hay, ir a buscarlas (Fetch bajo demanda).
       // 4. Gestionar los 3 bots de video.
       syncController.startNewsWorker();
-      
+     
+      syncShortsController.startShortsWorker();
       console.log("🤖 Worker Maestro iniciado (Modo: Bajo Demanda + Anti-Zombies)");
       
   })

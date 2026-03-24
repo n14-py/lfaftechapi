@@ -230,3 +230,102 @@ exports.generateImagePrompt = async (title, content) => {
         return `hyperrealistic news image about ${title}, cinematic lighting, 8k`; 
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+// 📱 NUEVA IA EXCLUSIVA PARA SHORTS (AISLADA PERO IDÉNTICA EN FORMATO)
+// ============================================================================
+exports.generateShortArticleContent = async (article) => {
+    const { url, title, description } = article; 
+
+    // 1. Obtener contexto (Scraping) - IDÉNTICO AL ORIGINAL
+    let contenidoReal = null;
+    if (url && url.startsWith('http')) {
+        contenidoReal = await fetchUrlContent(url);
+    }
+
+    let promptContexto = "";
+    if (contenidoReal && contenidoReal.length > 500) {
+        promptContexto = `CONTENIDO FUENTE:\n${contenidoReal}`;
+    } else {
+        promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
+    }
+
+    // 2. Prompt (Reglas exactas del original, pero adaptado a Shorts)
+    const prompt = `
+Actúa como un Periodista Senior experto en YouTube Shorts y TikTok. Escribe el guion de una noticia corta basada en:
+${promptContexto}
+
+--- REGLAS ESTRICTAS DE CONTENIDO ---
+- NO inventar información
+- NO agregar datos que no estén en el texto original
+- NO crear citas falsas
+- Mantener el mismo significado y hechos del contenido original
+- Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
+- Redacción clara, pero ULTRA DINÁMICA y directa al grano.
+
+--- REGLAS ESTRICTAS DE SALIDA ---
+Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
+
+Línea 1: Shorts
+
+Línea 2: TÍTULO VIRAL: [Título llamativo y muy corto para el Short, basado en hechos reales]
+
+Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
+
+Línea 4: [Cuerpo del guion completo. MÁXIMO 250 palabras. Empieza con un gancho fuerte y termina OBLIGATORIAMENTE con la frase "Suscríbete a Noticias.lat para más noticias."]
+`;
+
+    try {
+        // LLAMADA CON SISTEMA DE ROTACIÓN (Idéntico al original)
+        const fullText = await generateContentWithRetry(prompt);
+        
+        const lines = fullText.split('\n').filter(line => line.trim() !== '');
+
+        if (lines.length < 4) {
+             console.warn("[Gemini Shorts] Formato incorrecto, usando fallback simple.");
+             return { 
+                 categoria: "Shorts", 
+                 tituloViral: title, 
+                 textoImagen: title.split(' ').slice(0, 4).join(' '),
+                 articuloGenerado: fullText 
+             };
+        }
+
+        let categoria = "Shorts"; // Forzamos la categoría
+        let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
+        let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
+        
+        // Limpieza de seguridad del texto imagen (Idéntico al original)
+        if (textoImagen.length > 60 || textoImagen.length < 4) {
+             textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
+        }
+
+        const articuloGenerado = lines.slice(3).join('\n').trim();
+
+        console.log(`📱 [Gemini Shorts] Guion generado OK: "${tituloViral.substring(0,30)}..."`);
+        
+        return {
+            categoriaSugerida: categoria, 
+            categoria: categoria,       
+            tituloViral: tituloViral,
+            textoImagen: textoImagen,
+            articuloGenerado: articuloGenerado
+        };
+
+    } catch (error) {
+        console.error(`[Gemini Shorts] Error Final:`, error.message);
+        return null;
+    }
+};
