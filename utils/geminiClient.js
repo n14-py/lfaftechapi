@@ -162,7 +162,7 @@ Línea 2: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin in
 
 Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
 
-Línea 4: [Cuerpo de la noticia completo, mínimo 500 palabras...]
+Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
 `;
 
     try {
