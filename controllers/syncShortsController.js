@@ -93,7 +93,8 @@ exports.reportShortsQuotaLimitReached = () => {
 async function _resetStuckShortsVideos(forceAll = false) {
     try {
         // MUY IMPORTANTE: Solo afecta a los que sean categoría Shorts
-        let filtro = { videoProcessingStatus: 'processing', categoria: 'Shorts' };
+        // MUY IMPORTANTE: Solo afecta a los enlaces que terminan en #short
+        let filtro = { videoProcessingStatus: 'processing', enlaceOriginal: { $regex: /#short$/ } };
         
         if (!forceAll) {
             // Solo liberar las que llevan más de X minutos
@@ -368,8 +369,9 @@ async function _runShortsWorker() {
 
             // 2. CHEQUEO DE BUFFER (LA LÓGICA EXCLUSIVA)
             // Contamos cuántas noticias de Shorts están esperando o haciéndose
+// 2. CHEQUEO DE BUFFER 
             const pendingCount = await Article.countDocuments({
-                categoria: 'Shorts', // Solo cuenta los Shorts
+                enlaceOriginal: { $regex: /#short$/ }, // <-- Identificador exacto de shorts
                 $or: [
                     { videoProcessingStatus: 'pending', telegramPosted: false },
                     { videoProcessingStatus: 'processing' } 
@@ -418,24 +420,19 @@ async function _runShortsWorker() {
                 description: articleToProcess.description
             });
 
-            if (resultadoIA && resultadoIA.articuloGenerado) {
-                const { tituloViral, articuloGenerado, textoImagen } = resultadoIA;
-                
-                // Guardamos en Base de Datos
+ if (resultadoIA && resultadoIA.articuloGenerado) {
                 const newArticle = new Article({
-                    // Le agregamos un pequeño tag visual al título para saber que es un short
-                    titulo: "[Short] " + (tituloViral || articleToProcess.title), 
+                    titulo: resultadoIA.tituloViral || articleToProcess.title, // Título limpio
                     descripcion: articleToProcess.description,
                     imagen: articleToProcess.image || 'https://via.placeholder.com/800x600', 
                     sitio: 'noticias.lat',
-                    categoria: 'Shorts', // FORZAMOS CATEGORÍA
+                    categoria: resultadoIA.categoria, // <-- ¡LA IA DECIDE LA CATEGORÍA AQUÍ!
                     pais: articleToProcess.paisLocal,
                     fuente: articleToProcess.source.name,
-                    // IMPORTANTE: Agregamos #short para que MongoDB no dé error de duplicado si la misma noticia entró por el worker normal
-                    enlaceOriginal: articleToProcess.url + "#short",
+                    enlaceOriginal: articleToProcess.url + "#short", // Nuestra marca secreta para el sistema
                     fecha: new Date(articleToProcess.publishedAt || Date.now()),
-                    articuloGenerado: articuloGenerado, // El guion corto
-                    imageText: textoImagen, 
+                    articuloGenerado: resultadoIA.articuloGenerado, 
+                    imageText: resultadoIA.textoImagen, 
                     telegramPosted: false,
                     videoProcessingStatus: 'pending' 
                 });

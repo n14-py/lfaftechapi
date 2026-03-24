@@ -236,20 +236,12 @@ exports.generateImagePrompt = async (title, content) => {
 
 
 
-
-
-
-
-
-
-
 // ============================================================================
-// 📱 NUEVA IA EXCLUSIVA PARA SHORTS (AISLADA PERO IDÉNTICA EN FORMATO)
+// 📱 NUEVA IA EXCLUSIVA PARA SHORTS (RESPETANDO CATEGORÍAS ORIGINALES)
 // ============================================================================
 exports.generateShortArticleContent = async (article) => {
     const { url, title, description } = article; 
 
-    // 1. Obtener contexto (Scraping) - IDÉNTICO AL ORIGINAL
     let contenidoReal = null;
     if (url && url.startsWith('http')) {
         contenidoReal = await fetchUrlContent(url);
@@ -257,14 +249,13 @@ exports.generateShortArticleContent = async (article) => {
 
     let promptContexto = "";
     if (contenidoReal && contenidoReal.length > 500) {
-        promptContexto = `CONTENIDO FUENTE:\n${contenidoReal}`;
+        promptContexto = `CONTENIDO FUENTE COMPLETO:\n${contenidoReal}`;
     } else {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    // 2. Prompt (Reglas exactas del original, pero adaptado a Shorts)
     const prompt = `
-Actúa como un Periodista Senior experto en YouTube Shorts y TikTok. Escribe el guion de una noticia corta basada en:
+Actúa como un Periodista Senior. Escribe una noticia basada en:
 ${promptContexto}
 
 --- REGLAS ESTRICTAS DE CONTENIDO ---
@@ -273,53 +264,35 @@ ${promptContexto}
 - NO crear citas falsas
 - Mantener el mismo significado y hechos del contenido original
 - Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
-- Redacción clara, pero ULTRA DINÁMICA y directa al grano.
+- Redacción clara, informativa y coherente
 
 --- REGLAS ESTRICTAS DE SALIDA ---
 Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
 
-Línea 1: Shorts
+Línea 1: [Categoría real de la noticia. Ej: Política, Economía, Tecnología, Deportes, etc.]
 
-Línea 2: TÍTULO VIRAL: [Título llamativo y muy corto para el Short, basado en hechos reales]
+Línea 2: TÍTULO PROFESIONAL: [Título serio, informativo y conciso para la noticia]
 
-Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
+Línea 3: TEXTO IMAGEN: [Frase visual de 3 a 5 palabras, SIN preposiciones al final]
 
-Línea 4: [Cuerpo del guion completo. MÁXIMO 250 palabras. Empieza con un gancho fuerte y termina OBLIGATORIAMENTE con la frase "Suscríbete a Noticias.lat para más noticias."]
+Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a 350 palabras. Empieza con un gancho y termina con "Suscríbete a Noticias lat para más noticias."]
 `;
 
     try {
-        // LLAMADA CON SISTEMA DE ROTACIÓN (Idéntico al original)
         const fullText = await generateContentWithRetry(prompt);
-        
         const lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        if (lines.length < 4) {
-             console.warn("[Gemini Shorts] Formato incorrecto, usando fallback simple.");
-             return { 
-                 categoria: "Shorts", 
-                 tituloViral: title, 
-                 textoImagen: title.split(' ').slice(0, 4).join(' '),
-                 articuloGenerado: fullText 
-             };
-        }
+        if (lines.length < 4) return null;
 
-        let categoria = "Shorts"; // Forzamos la categoría
-        let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
+        // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
+        let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
+        let tituloProfesional = lines[1].replace(/^TÍTULO PROFESIONAL:/i, '').replace(/^"|"$/g, '').trim();
         let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
-        
-        // Limpieza de seguridad del texto imagen (Idéntico al original)
-        if (textoImagen.length > 60 || textoImagen.length < 4) {
-             textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
-        }
-
         const articuloGenerado = lines.slice(3).join('\n').trim();
-
-        console.log(`📱 [Gemini Shorts] Guion generado OK: "${tituloViral.substring(0,30)}..."`);
         
         return {
-            categoriaSugerida: categoria, 
-            categoria: categoria,       
-            tituloViral: tituloViral,
+            categoria: categoria, // La IA manda aquí
+            tituloViral: tituloProfesional,
             textoImagen: textoImagen,
             articuloGenerado: articuloGenerado
         };
