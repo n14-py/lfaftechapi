@@ -30,7 +30,8 @@ const ArticleSchema = new mongoose.Schema({
     // 'failed': Algo salió mal
     videoProcessingStatus: { 
         type: String, 
-        enum: ['pending', 'processing', 'complete', 'failed'], 
+        // ¡Agregamos los estados exclusivos para Shorts!
+        enum: ['pending', 'processing', 'complete', 'failed', 'pending_short', 'processing_short'], 
         default: 'pending', 
         index: true 
     },

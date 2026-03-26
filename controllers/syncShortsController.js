@@ -94,17 +94,16 @@ async function _resetStuckShortsVideos(forceAll = false) {
     try {
         // MUY IMPORTANTE: Solo afecta a los que sean categoría Shorts
         // MUY IMPORTANTE: Solo afecta a los enlaces que terminan en #short
-        let filtro = { videoProcessingStatus: 'processing', enlaceOriginal: { $regex: /#short$/ } };
-        
+    let filtro = { videoProcessingStatus: 'processing_short', enlaceOriginal: { $regex: /#short$/ } };        
         if (!forceAll) {
             // Solo liberar las que llevan más de X minutos
             const timeLimit = new Date(Date.now() - TIMEOUT_ZOMBIES_MINUTES * 60 * 1000);
             filtro.updatedAt = { $lt: timeLimit };
         }
 
-        const result = await Article.updateMany(
+    const result = await Article.updateMany(
             filtro,
-            { $set: { videoProcessingStatus: 'pending' } } 
+            { $set: { videoProcessingStatus: 'pending_short' } }
         );
 
         if (result.modifiedCount > 0) {
@@ -281,8 +280,8 @@ async function _triggerShortBotWithRotation(article) {
 
     // --- LA MAGIA: BLOQUEO ATÓMICO ---
     const articleCheck = await Article.findOneAndUpdate(
-        { _id: article._id, videoProcessingStatus: 'pending' },
-        { $set: { videoProcessingStatus: 'processing' } },
+        { _id: article._id, videoProcessingStatus: 'pending_short' }, // <-- Aquí
+        { $set: { videoProcessingStatus: 'processing_short' } },      // <-- Aquí
         { new: true }
     );
 
@@ -333,7 +332,7 @@ async function _triggerShortBotWithRotation(article) {
 
     if (!sent) {
         console.error(`[ShortBot] ❌ Ningún bot aceptó el Short. Volviendo a 'pending' para luego.`);
-        articleCheck.videoProcessingStatus = 'pending';
+        articleCheck.videoProcessingStatus = 'pending_short'; // <-- Aquí
         await articleCheck.save();
     }
 }
@@ -371,10 +370,10 @@ async function _runShortsWorker() {
             // Contamos cuántas noticias de Shorts están esperando o haciéndose
 // 2. CHEQUEO DE BUFFER 
             const pendingCount = await Article.countDocuments({
-                enlaceOriginal: { $regex: /#short$/ }, // <-- Identificador exacto de shorts
+                enlaceOriginal: { $regex: /#short$/ },
                 $or: [
-                    { videoProcessingStatus: 'pending', telegramPosted: false },
-                    { videoProcessingStatus: 'processing' } 
+                    { videoProcessingStatus: 'pending_short', telegramPosted: false }, // <-- Aquí
+                    { videoProcessingStatus: 'processing_short' } // <-- Aquí
                 ]
             });
 
@@ -386,7 +385,7 @@ async function _runShortsWorker() {
                 
                 const retryArticle = await Article.findOne({ 
                     categoria: 'Shorts',
-                    videoProcessingStatus: 'pending',
+                    videoProcessingStatus: 'pending_short',
                     telegramPosted: false 
                 }).sort({ createdAt: 1 });
 
@@ -434,7 +433,7 @@ async function _runShortsWorker() {
                     articuloGenerado: resultadoIA.articuloGenerado, 
                     imageText: resultadoIA.textoImagen, 
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending' 
+                    videoProcessingStatus: 'pending_short'
                 });
                 
                 await newArticle.save();
@@ -499,7 +498,7 @@ exports.createManualShortArticle = async (req, res) => {
             categoria: 'Shorts',
             pais: 'general',
             telegramPosted: false,
-            videoProcessingStatus: 'pending'
+            videoProcessingStatus: 'pending_short'
         });
 
         await newArticle.save();
