@@ -384,7 +384,7 @@ async function _runShortsWorker() {
                 console.log(`[Shorts Worker] ✋ Buffer Shorts lleno. Pausa de IA. Solo despachando...`);
                 
                 const retryArticle = await Article.findOne({ 
-                    categoria: 'Shorts',
+                    enlaceOriginal: { $regex: /#short$/ },
                     videoProcessingStatus: 'pending_short',
                     telegramPosted: false 
                 }).sort({ createdAt: 1 });
