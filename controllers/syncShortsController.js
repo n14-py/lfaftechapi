@@ -10,7 +10,7 @@ const { generateShortArticleContent } = require('../utils/geminiClient');
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
-    "http://3.133.86.27:3001" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
+    "http://3.22.112.31:3001" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
 ];
 
 // Clave para comunicar con los bots (si la usan)
