@@ -6,6 +6,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+
+const Member = require('./models/member');
 // NOTA: Eliminamos 'node-cron', ya no se necesita.
 
 // Importamos el "enrutador" principal
@@ -54,6 +56,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+// Servir la carpeta uploads como estática para que se vean las imágenes de los miembros
+app.use('/uploads', express.static('uploads'));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // =============================================
