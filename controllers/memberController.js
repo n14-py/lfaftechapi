@@ -27,36 +27,39 @@ exports.verifyAndSyncMember = async (req, res) => {
         if (!member) {
             member = new Member({ googleId, email, displayName, avatar });
         } else {
-            // Actualizar datos del perfil por si cambió su foto o nombre
             member.displayName = displayName;
             member.avatar = avatar;
         }
 
-        // Guardar tokens de acceso
         member.accessToken = tokens.access_token;
         if (tokens.refresh_token) member.refreshToken = tokens.refresh_token;
 
         const now = new Date();
-        const oneMonthAgo = new Date();
-        oneMonthAgo.setMonth(now.getMonth() - 1);
+        
+        // --- LÓGICA DE ACTUALIZACIÓN INTELIGENTE ---
+        // Forzamos verificación si:
+        // 1. Es un usuario nuevo (no tiene lastYoutubeCheck).
+        // 2. No tiene créditos (probablemente se acaba de suscribir para obtenerlos).
+        // 3. Han pasado más de 24 horas (por si se suscribió a otro canal adicional).
+        const unDiaEnMs = 24 * 60 * 60 * 1000;
+        const tiempoDesdeUltimoCheck = member.lastYoutubeCheck ? (now - member.lastYoutubeCheck) : unDiaEnMs;
 
-        // SOLO consultar a la API de YouTube si pasó un mes o es usuario nuevo
-        if (!member.lastYoutubeCheck || member.lastYoutubeCheck < oneMonthAgo) {
+        const necesitaVerificacion = !member.lastYoutubeCheck || 
+                                     (member.totalCredits - member.creditsUsed <= 0) || 
+                                     (tiempoDesdeUltimoCheck >= unDiaEnMs);
+
+        if (necesitaVerificacion) {
             console.log(`[Members API] Verificando membresías en YouTube para: ${email}`);
             
-            // Obtener canales desde el .env
             const channelIdsString = process.env.YOUTUBE_CHANNEL_IDS || '';
             const channelIds = channelIdsString.split(',').filter(id => id.trim() !== '');
             
             let totalAccumulatedCredits = 0;
             let highestLevel = 0;
 
-            // Recorrer todos los canales y sumar beneficios
             for (const channelId of channelIds) {
                 const level = await checkYoutubeMembership(member.accessToken, channelId.trim());
-                
                 if (level > highestLevel) highestLevel = level;
-                
                 if (LEVEL_CONFIG[level]) {
                     totalAccumulatedCredits += LEVEL_CONFIG[level].credits;
                 }
@@ -66,11 +69,14 @@ exports.verifyAndSyncMember = async (req, res) => {
             member.totalCredits = totalAccumulatedCredits;
             member.lastYoutubeCheck = now;
             
-            // Reset de créditos mensuales
-            member.creditsUsed = 0;
-            member.nextResetDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+            // Si es un usuario nuevo o su ciclo ya venció, reseteamos el contador mensual
+            const unMesEnMs = 30 * 24 * 60 * 60 * 1000;
+            if (!member.nextResetDate || now > member.nextResetDate) {
+                member.creditsUsed = 0;
+                member.nextResetDate = new Date(now.getTime() + unMesEnMs);
+            }
             
-            console.log(`[Members API] ${email} verificado. Nivel: ${highestLevel}, Créditos: ${totalAccumulatedCredits}`);
+            console.log(`[Members API] ${email} sincronizado. Créditos actuales: ${member.totalCredits - member.creditsUsed}`);
         }
 
         await member.save();
@@ -89,30 +95,23 @@ exports.publishMemberArticle = async (req, res) => {
     try {
         const { googleId, title, content, videoType } = req.body;
         
-        // Verificar que llegó la imagen
         if (!req.file) {
             return res.status(400).json({ success: false, error: "No se subió ninguna imagen." });
         }
 
-        // 1. Buscar al usuario
         const member = await Member.findOne({ googleId });
         if (!member) {
-            // Eliminar la imagen que se acaba de subir si el usuario no existe
-            fs.unlinkSync(req.file.path);
-            return res.status(404).json({ success: false, error: "Usuario no encontrado en la base de datos." });
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(404).json({ success: false, error: "Usuario no encontrado." });
         }
 
-        // 2. Seguridad: Verificar que realmente tenga créditos
         const availableCredits = member.totalCredits - member.creditsUsed;
         if (availableCredits <= 0) {
-            fs.unlinkSync(req.file.path);
-            return res.status(403).json({ success: false, error: "Créditos insuficientes. Debes renovar tu membresía." });
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(403).json({ success: false, error: "Créditos insuficientes." });
         }
 
-        console.log(`[Members API] Creando publicación de ${member.displayName}. Video: ${videoType}`);
-
-        // 3. Crear el artículo en la base de datos
-        const imagePath = `/uploads/${req.file.filename}`; // Ruta que leerá el frontend
+        const imagePath = `/uploads/${req.file.filename}`;
 
         const newArticle = new Article({
             title: title.trim(),
@@ -122,31 +121,27 @@ exports.publishMemberArticle = async (req, res) => {
             category: "Comunidad",
             status: "published", 
             videoType: videoType, 
-            isMemberContent: true, // Etiqueta especial para diferenciarlo de tus noticias oficiales
-            memberGoogleId: googleId, // Para enlazarlo fuertemente a su cuenta
+            isMemberContent: true,
+            memberGoogleId: googleId,
             publishDate: new Date()
         });
 
         await newArticle.save();
 
-        // 4. Descontar 1 crédito al usuario y guardar
         member.creditsUsed += 1;
         await member.save();
 
         res.json({ 
             success: true, 
-            message: "Noticia creada y enviada a la cola de videos.", 
+            message: "Noticia creada con éxito.", 
             articleId: newArticle._id,
             remainingCredits: member.totalCredits - member.creditsUsed 
         });
 
     } catch (error) {
-        console.error("[Members API] Error al publicar noticia de miembro:", error);
-        // Si hay error, intentar borrar la imagen para no ocupar espacio basura
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-        }
-        res.status(500).json({ success: false, error: "Error interno de los servidores al procesar la publicación." });
+        console.error("[Members API] Error al publicar:", error);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ success: false, error: "Error al procesar la publicación." });
     }
 };
 
@@ -156,22 +151,19 @@ exports.publishMemberArticle = async (req, res) => {
 exports.getMemberHistory = async (req, res) => {
     try {
         const { googleId } = req.params;
-        
         const member = await Member.findOne({ googleId });
         if (!member) return res.status(404).json({ success: false, error: "Usuario no encontrado." });
 
-        // Buscar los artículos que le pertenecen al usuario, ordenados de más nuevo a más viejo
         const articles = await Article.find({ 
             $or: [
-                { memberGoogleId: googleId }, // Por ID (método nuevo y seguro)
-                { author: member.displayName, isMemberContent: true } // Por nombre (retrocompatibilidad)
+                { memberGoogleId: googleId },
+                { author: member.displayName, isMemberContent: true }
             ]
         }).sort({ publishDate: -1, createdAt: -1 });
 
         res.json({ success: true, articles });
-
     } catch (error) {
-        console.error("[Members API] Error al obtener historial:", error);
+        console.error("[Members API] Error historial:", error);
         res.status(500).json({ success: false, error: "Error al recuperar el historial." });
     }
 };
@@ -193,17 +185,13 @@ async function checkYoutubeMembership(accessToken, channelId) {
         });
 
         if (response.data.items && response.data.items.length > 0) {
-            // Analizar el nivel del miembro basándonos en el nombre de la membresía en YouTube
             const levelName = response.data.items[0].snippet.memberDetails.displayName.toLowerCase();
-            
-            // Lógica de asignación de niveles
             if (levelName.includes("vip") || levelName.includes("premium") || levelName.includes("nivel 3")) return 3;
             if (levelName.includes("pro") || levelName.includes("intermedio") || levelName.includes("nivel 2")) return 2;
-            return 1; // Nivel básico por defecto si es miembro
+            return 1;
         }
-        return 0; // No es miembro
+        return 0;
     } catch (e) {
-        // El error 403 o 400 significa que el usuario no tiene acceso o no es miembro
         return 0; 
     }
 }
