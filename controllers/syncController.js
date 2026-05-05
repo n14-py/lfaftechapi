@@ -333,7 +333,7 @@ async function _triggerVideoBotWithRotation(article) {
                 timeout: 10000 
             });
 
-            if (response.status === 200) {
+            if (response.status === 200 || response.status === 202) {
                 console.log(`[VideoBot] ✅ Tarea aceptada por ${targetBotUrl}. Renderizado horizontal en curso.`);
                 sent = true;
             }
