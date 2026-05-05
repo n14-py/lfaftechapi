@@ -4,7 +4,7 @@
 const axios = require('axios');
 const Article = require('../models/article');
 // Importamos el cliente Gemini Rotativo (asegurate de haber actualizado geminiClient.js)
-const { generateArticleContent } = require('../utils/geminiClient');
+const { generateArticleContent, generateVideoScenesJSON } = require('../utils/geminiClient');
 
 // ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 1 es short
@@ -277,7 +277,7 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 // ============================================================================
 
 // Importamos la nueva función arriba del archivo (asegúrate de que esté junto a generateArticleContent)
-const { generateArticleContent, generateVideoScenesJSON } = require('../utils/geminiClient');
+
 
 // ============================================================================
 // 6. EL GESTOR DE BOTS (DISPATCHER)
