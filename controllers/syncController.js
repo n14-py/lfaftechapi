@@ -276,60 +276,67 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 // 🤖 6. EL GESTOR DE BOTS (DISPATCHER)
 // ============================================================================
 
+// Importamos la nueva función arriba del archivo (asegúrate de que esté junto a generateArticleContent)
+const { generateArticleContent, generateVideoScenesJSON } = require('../utils/geminiClient');
+
+// ============================================================================
+// 6. EL GESTOR DE BOTS (DISPATCHER)
+// ============================================================================
 async function _triggerVideoBotWithRotation(article) {
     if (VIDEO_BOT_URLS.length === 0) {
-        console.warn(`[VideoBot] ❌ ERROR: No hay URLs de bots configuradas.`);
+        console.warn(`[VideoBot] ⚠️ ERROR: No hay URLs de bots configuradas.`);
         return;
     }
 
-    // --- LA MAGIA: BLOQUEO ATÓMICO ---
-    // Busca la noticia SÓLO si está en 'pending' y le pone 'processing' al instante.
-    // Si otro bot ya la agarró un milisegundo antes, esto devuelve null y se cancela.
+    // Bloqueo atómico
     const articleCheck = await Article.findOneAndUpdate(
         { _id: article._id, videoProcessingStatus: 'pending' },
         { $set: { videoProcessingStatus: 'processing' } },
         { new: true }
     );
 
-    // Si es null, otro bot ya se la llevó. No hacemos nada.
     if (!articleCheck) {
-        console.log(`[VideoBot] ⏭️ La noticia ya fue tomada por otro bot. Ignorando duplicado.`);
+        console.log(`[VideoBot] 🛑 La noticia ya fue tomada por otro bot. Ignorando duplicado.`);
         return;
     }
 
-    // Intentamos con hasta 3 bots diferentes si el primero falla
+    // --- ¡MAGIA DE ESCENAS AQUÍ! ---
+    // Llamamos a Gemini para que pique el artículo largo en un JSON de 15 escenas
+    console.log(`[VideoBot] 🧠 Construyendo guion de escenas para: ${articleCheck.titulo}...`);
+    let payload_escenas = await generateVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);
+    // Si Gemini falla al armar el JSON, devolvemos el artículo a 'pending' para reintentar luego
+    if (!payload_escenas || !payload_escenas.scenes || payload_escenas.scenes.length === 0) {
+        console.error(`[VideoBot] ❌ Falló la generación de escenas JSON. Regresando a pendiente.`);
+        articleCheck.videoProcessingStatus = 'pending';
+        await articleCheck.save();
+        return;
+    }
+
+    // Le inyectamos el ID de la base de datos al JSON para que Python sepa a quién pertenece
+    payload_escenas.article_id = articleCheck._id;
+
     let attempts = 0;
     let sent = false;
 
     while (!sent && attempts < 3) {
-        // Seleccionar Bot (Round Robin)
         const targetBotUrl = VIDEO_BOT_URLS[currentBotIndex];
         currentBotIndex = (currentBotIndex + 1) % VIDEO_BOT_URLS.length;
 
         try {
             await _wakeUpBot(targetBotUrl);
-
-            const payload = {
-                text: articleCheck.articuloGenerado, 
-                title: articleCheck.titulo,            
-                image_url: articleCheck.imagen, 
-                article_id: articleCheck._id,
-                category: articleCheck.categoria
-            };
-
-            console.log(`[VideoBot] 📡 Enviando tarea a ${targetBotUrl} (Intento ${attempts+1})...`);
             
-            const response = await axios.post(`${targetBotUrl}/generate_video`, payload, { 
+            console.log(`[VideoBot] 🚀 Enviando MEGA JSON de ${payload_escenas.scenes.length} escenas a ${targetBotUrl} (Intento ${attempts+1})...`);
+            
+            // Le mandamos todo el objeto payload_escenas al bot de Python
+            const response = await axios.post(`${targetBotUrl}/generate_video`, payload_escenas, { 
                 headers: { 'x-api-key': VIDEO_BOT_KEY },
                 timeout: 10000 
             });
 
             if (response.status === 200) {
-                console.log(`[VideoBot] ✅ Tarea aceptada por ${targetBotUrl}.`);
-                // Ya la marcamos como processing arriba, no hace falta guardar de nuevo.
+                console.log(`[VideoBot] ✅ Tarea aceptada por ${targetBotUrl}. Renderizado horizontal en curso.`);
                 sent = true;
             }
-
         } catch (error) {
             const status = error.response ? error.response.status : 'RED';
             console.warn(`[VideoBot] ⚠️ Fallo en ${targetBotUrl} (Status: ${status}). Probando siguiente...`);
@@ -340,7 +347,6 @@ async function _triggerVideoBotWithRotation(article) {
 
     if (!sent) {
         console.error(`[VideoBot] ❌ Ningún bot aceptó la tarea. Volviendo a 'pending' para luego.`);
-        // Si ningún bot pudo, le quitamos el candado para que se intente más tarde.
         articleCheck.videoProcessingStatus = 'pending';
         await articleCheck.save();
     }
