@@ -38,7 +38,7 @@ function getModel() {
     
     // Usamos el modelo 2.5 Flash (o 1.5-flash si prefieres)
     return genAI.getGenerativeModel({ 
-        model: "gemma-4-31b-it", 
+        model: "gemini-2.5-flash", 
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
