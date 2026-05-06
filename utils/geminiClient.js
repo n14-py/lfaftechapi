@@ -153,15 +153,13 @@ ${promptContexto}
 - Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
 - Redacción clara, informativa y coherente
 
---- REGLAS ESTRICTAS DE SALIDA ---
-Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
+--- REGLAS ESTRICTAS DE SALIDA (¡CRÍTICO!) ---
+¡PROHIBIDO PENSAR EN VOZ ALTA! NO generes borradores, "scratchpads", procesos iterativos ("Drafting..."), ni repitas las restricciones ("Constraints:"). TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EL RESULTADO FINAL.
+Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones ni saludos, NO uses Markdown (negritas/cursivas) en los encabezados.
 
 Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
-
 Línea 2: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
-
 Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
-
 Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
 `;
 
