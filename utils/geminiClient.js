@@ -167,9 +167,20 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
         // LLAMADA CON SISTEMA DE ROTACIÓN
         const fullText = await generateContentWithRetry(prompt);
         
-        const lines = fullText.split('\n').filter(line => line.trim() !== '');
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
+        
+        // --- ESCUDO ANTI-PENSAMIENTOS PARA GEMMA 4 ---
+        // Buscamos exactamente en qué línea empieza el TÍTULO VIRAL
+        const tituloIndex = lines.findIndex(l => l.toUpperCase().includes('TÍTULO VIRAL:'));
+        
+        if (tituloIndex > 0) {
+            // Si el título está más abajo, sabemos que la categoría está justo una línea arriba.
+            // Eliminamos toda la basura (el monólogo interno) que esté antes de la categoría.
+            lines.splice(0, tituloIndex - 1); 
+        }
+        // ----------------------------------------------
 
-        if (lines.length < 4) {
+        if (lines.length < 4) {
              console.warn("[Gemini] Formato incorrecto, usando fallback simple.");
              return { 
                  categoria: "general", 
@@ -278,9 +289,17 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
 
     try {
         const fullText = await generateContentWithRetry(prompt);
-        const lines = fullText.split('\n').filter(line => line.trim() !== '');
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
+        
+        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS ---
+        const tituloIndex = lines.findIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
+        
+        if (tituloIndex > 0) {
+            lines.splice(0, tituloIndex - 1); 
+        }
+        // ----------------------------------------------
 
-        if (lines.length < 4) return null;
+        if (lines.length < 4) return null;  
 
         // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
         let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
