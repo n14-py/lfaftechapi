@@ -86,8 +86,15 @@ async function fetchUrlContent(url) {
     }
 }
 
+
+
+
+
+
+
+
 // ============================================================================
-// 📰 FUNCIÓN PRINCIPAL: GENERADOR DE NOTICIAS (CON REINTENTOS)
+// 📰 FUNCIÓN PRINCIPAL: GENERADOR DE NOTICIAS (CON REINTENTOS BLINDADOS)
 // ============================================================================
 
 async function generateContentWithRetry(prompt, retries = 0) {
@@ -101,12 +108,12 @@ async function generateContentWithRetry(prompt, retries = 0) {
                              error.message.includes("Quota exceeded") || 
                              error.message.includes("Resource has been exhausted") ||
                              error.message.includes("API key not valid") || 
-                             error.message.includes("400"); // Agregué 400 por si acaso
+                             error.message.includes("400"); 
 
         if (isQuotaError) {
-            console.warn(`⛔ [Gemini] Fallo en Key #${currentKeyIndex + 1} (Status: ${error.status || 'Quota/Auth'}).`);
+            console.warn(`⛔ [Gemini] Fallo en Key #${currentKeyIndex + 1} (Status: ${error.status || 'Quota/Auth'}). Detalle: ${error.message.substring(0, 40)}...`);
             
-            // Si tenemos más claves y no hemos dado la vuelta completa a todas las claves
+            // Si tenemos más claves y no hemos dado la vuelta completa
             if (retries < apiKeys.length) {
                 rotateKey();
                 console.log(`🔄 [Gemini] Reintentando generación con nueva clave... (Intento ${retries + 1})`);
@@ -114,14 +121,18 @@ async function generateContentWithRetry(prompt, retries = 0) {
                 return await generateContentWithRetry(prompt, retries + 1);
             } else {
                 console.error("❌ [Gemini] ¡TODAS LAS CLAVES AGOTADAS! Esperando 60 segundos antes de fallar...");
-                // Espera de emergencia si todas las claves murieron
+                // Espera de emergencia si todas las claves murieron para no colapsar el servidor
                 await new Promise(resolve => setTimeout(resolve, 60000));
                 throw new Error("Todas las cuotas de API agotadas.");
             }
         }
-        throw error; // Si es otro error (ej. red), lo lanzamos
+        throw error; // Si es otro error (ej. caída de internet), lo lanzamos
     }
 }
+
+// ============================================================================
+// 📝 GENERADOR DE ARTÍCULOS LARGOS (PROTEGIDO CONTRA IA REBELDE)
+// ============================================================================
 
 exports.generateArticleContent = async (article) => {
     const { url, title, description } = article; 
@@ -129,7 +140,6 @@ exports.generateArticleContent = async (article) => {
     // 1. Obtener contexto (Scraping)
     let contenidoReal = null;
     if (url && url.startsWith('http')) {
-        // console.log(`[GeminiClient] Leyendo: ${title.substring(0, 20)}...`);
         contenidoReal = await fetchUrlContent(url);
     }
 
@@ -140,9 +150,8 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    // 2. Prompt (Optimizado para que no falle el formato)
-const prompt = `
-Actúa como un Periodista Senior. Escribe una noticia basada en:
+    // 2. Prompt Blindado (Muro anti-borradores)
+    const prompt = `Actúa como un Periodista Senior. Escribe una noticia basada en:
 ${promptContexto}
 
 --- REGLAS ESTRICTAS DE CONTENIDO ---
@@ -160,29 +169,28 @@ Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introduccio
 Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
 Línea 2: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
 Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
-Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
-`;
+Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
 
     try {
         // LLAMADA CON SISTEMA DE ROTACIÓN
         const fullText = await generateContentWithRetry(prompt);
         
-        const lines = fullText.split('\n').filter(line => line.trim() !== '');
-
+        // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
         let lines = fullText.split('\n').filter(line => line.trim() !== '');
-        
+
         // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS ---
-        // findLastIndex busca de ABAJO HACIA ARRIBA. Ignora los borradores del inicio.
+        // Buscamos de ABAJO hacia ARRIBA para saltarnos todo el monólogo inicial de Gemma 4
         const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO VIRAL:'));
         
         if (tituloIndex > 0) {
-            // Nos quedamos SOLO con la categoría (tituloIndex - 1) en adelante. Basura eliminada.
+            // Tijera: Nos quedamos solo con lo que importa. El índice - 1 es la Categoría.
             lines = lines.slice(tituloIndex - 1); 
         }
         // ----------------------------------------------
 
+        // Si después de limpiar quedó vacío o incompleto, aplicamos el salvavidas
         if (lines.length < 4) {
-             console.warn("[Gemini] Formato incorrecto, usando fallback simple.");
+             console.warn("⚠️ [Gemini] Formato incorrecto o texto destruido, usando fallback simple.");
              return { 
                  categoria: "general", 
                  tituloViral: title, 
@@ -191,19 +199,31 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
              };
         }
 
+        // 3. Limpieza de Extrema Precisión (Regex)
+        // cleanCategory asumo que ya lo tienes definido arriba en tu código
         let categoria = cleanCategory(lines[0]);
-        // Expresión regular mejorada para borrar asteriscos u otra basura antes del título
-        let tituloViral = lines[1].replace(/.*TÍTULO VIRAL:\s*/i, '').replace(/^"|"$/g, '').trim();
-        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/^"|"$/g, '').trim();
         
-        // Limpieza de seguridad del texto imagen
+        // Extraemos el título destruyendo: la etiqueta, los asteriscos, las comillas y los espacios muertos
+        let tituloViral = lines[1]
+            .replace(/.*TÍTULO VIRAL:\s*/i, '')
+            .replace(/[\*"]/g, '')
+            .trim();
+        
+        // Extraemos el texto de imagen destruyendo basura igual que arriba
+        let textoImagen = lines[2]
+            .replace(/.*TEXTO IMAGEN:\s*/i, '')
+            .replace(/[\*"]/g, '')
+            .trim();
+        
+        // Filtro de seguridad por si la IA hizo un texto de imagen ridículamente largo
         if (textoImagen.length > 60 || textoImagen.length < 4) {
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
+        // Unimos todas las líneas restantes como el cuerpo de la noticia (soporta párrafos)
         const articuloGenerado = lines.slice(3).join('\n').trim();
 
-        console.log(`📝 [Gemini] Noticia generada OK: "${tituloViral.substring(0,30)}..."`);
+        console.log(`✅ [Gemini] Noticia generada OK: "${tituloViral.substring(0,30)}..."`);
         
         return {
             categoriaSugerida: categoria, 
@@ -214,10 +234,25 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
         };
 
     } catch (error) {
-        console.error(`[Gemini] Error Final:`, error.message);
+        console.error(`❌ [Gemini] Error Crítico Final:`, error.message);
         return null;
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ============================================================================
 // 📻 GENERADOR DE RADIOS (También con rotación)
@@ -291,21 +326,22 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
 
     try {
         const fullText = await generateContentWithRetry(prompt);
-        let lines = fullText.split('\n').filter(line => line.trim() !== '');
-        
-        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS PARA SHORTS ---
-        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
-        
-        if (tituloIndex > 0) {
-            lines = lines.slice(tituloIndex - 1); 
-        }
-        // ----------------------------------------------
+        const lines = fullText.split('\n').filter(line => line.trim() !== '');
 
         if (lines.length < 4) return null;
 
-        let categoria = lines[0].replace(/.*(?:Categoría|Categoria):\s*/i, '').replace(/[^a-zA-Z\s]/g, '').trim();
-        let tituloProfesional = lines[1].replace(/.*TÍTULO PROFESIONAL:\s*/i, '').replace(/^"|"$/g, '').trim();
-        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/^"|"$/g, '').trim();
+        // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
+        let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
+        let tituloProfesional = lines[1].replace(/^TÍTULO PROFESIONAL:/i, '').replace(/^"|"$/g, '').trim();
+        let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
+        const articuloGenerado = lines.slice(3).join('\n').trim();
+        
+        return {
+            categoria: categoria, // La IA manda aquí
+            tituloViral: tituloProfesional,
+            textoImagen: textoImagen,
+            articuloGenerado: articuloGenerado
+        };
 
     } catch (error) {
         console.error(`[Gemini Shorts] Error Final:`, error.message);
