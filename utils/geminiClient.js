@@ -167,20 +167,21 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
         // LLAMADA CON SISTEMA DE ROTACIÓN
         const fullText = await generateContentWithRetry(prompt);
         
+        const lines = fullText.split('\n').filter(line => line.trim() !== '');
+
         let lines = fullText.split('\n').filter(line => line.trim() !== '');
         
-        // --- ESCUDO ANTI-PENSAMIENTOS PARA GEMMA 4 ---
-        // Buscamos exactamente en qué línea empieza el TÍTULO VIRAL
-        const tituloIndex = lines.findIndex(l => l.toUpperCase().includes('TÍTULO VIRAL:'));
+        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS ---
+        // findLastIndex busca de ABAJO HACIA ARRIBA. Ignora los borradores del inicio.
+        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO VIRAL:'));
         
-        if (tituloIndex > 0) {
-            // Si el título está más abajo, sabemos que la categoría está justo una línea arriba.
-            // Eliminamos toda la basura (el monólogo interno) que esté antes de la categoría.
-            lines.splice(0, tituloIndex - 1); 
-        }
-        // ----------------------------------------------
+        if (tituloIndex > 0) {
+            // Nos quedamos SOLO con la categoría (tituloIndex - 1) en adelante. Basura eliminada.
+            lines = lines.slice(tituloIndex - 1); 
+        }
+        // ----------------------------------------------
 
-        if (lines.length < 4) {
+        if (lines.length < 4) {
              console.warn("[Gemini] Formato incorrecto, usando fallback simple.");
              return { 
                  categoria: "general", 
@@ -191,8 +192,9 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]
         }
 
         let categoria = cleanCategory(lines[0]);
-        let tituloViral = lines[1].replace(/^TÍTULO VIRAL:/i, '').replace(/^"|"$/g, '').trim();
-        let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
+        // Expresión regular mejorada para borrar asteriscos u otra basura antes del título
+        let tituloViral = lines[1].replace(/.*TÍTULO VIRAL:\s*/i, '').replace(/^"|"$/g, '').trim();
+        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/^"|"$/g, '').trim();
         
         // Limpieza de seguridad del texto imagen
         if (textoImagen.length > 60 || textoImagen.length < 4) {
@@ -291,28 +293,19 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
         const fullText = await generateContentWithRetry(prompt);
         let lines = fullText.split('\n').filter(line => line.trim() !== '');
         
-        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS ---
-        const tituloIndex = lines.findIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
+        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS PARA SHORTS ---
+        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
         
-        if (tituloIndex > 0) {
-            lines.splice(0, tituloIndex - 1); 
-        }
-        // ----------------------------------------------
+        if (tituloIndex > 0) {
+            lines = lines.slice(tituloIndex - 1); 
+        }
+        // ----------------------------------------------
 
-        if (lines.length < 4) return null;  
+        if (lines.length < 4) return null;
 
-        // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
-        let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
-        let tituloProfesional = lines[1].replace(/^TÍTULO PROFESIONAL:/i, '').replace(/^"|"$/g, '').trim();
-        let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
-        const articuloGenerado = lines.slice(3).join('\n').trim();
-        
-        return {
-            categoria: categoria, // La IA manda aquí
-            tituloViral: tituloProfesional,
-            textoImagen: textoImagen,
-            articuloGenerado: articuloGenerado
-        };
+        let categoria = lines[0].replace(/.*(?:Categoría|Categoria):\s*/i, '').replace(/[^a-zA-Z\s]/g, '').trim();
+        let tituloProfesional = lines[1].replace(/.*TÍTULO PROFESIONAL:\s*/i, '').replace(/^"|"$/g, '').trim();
+        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/^"|"$/g, '').trim();
 
     } catch (error) {
         console.error(`[Gemini Shorts] Error Final:`, error.message);
