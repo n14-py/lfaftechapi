@@ -383,7 +383,7 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
         
         // --- INYECCIÓN DE DESCRIPCIÓN PARA YOUTUBE ---
         // Cortamos el texto original a 4500 caracteres para no pasarnos del límite de 5000 de YouTube
-        const noticiaRecortada = textoLargo.substring(0, 4500);
+        const noticiaRecortada = textoLargo.substring(0, 4000);
         
         // Armamos la URL específica de la noticia
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
