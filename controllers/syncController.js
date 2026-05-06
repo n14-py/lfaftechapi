@@ -10,7 +10,7 @@ const { generateArticleContent, generateVideoScenesJSON } = require('../utils/ge
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 1 es short
 // ============================================================================
 const VIDEO_BOT_URLS = [
-    "http://3.21.168.88:3001"
+    "http://3.22.170.219:3001"
 ];
 
 // Clave para comunicar con los bots (si la usan)
