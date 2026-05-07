@@ -10,7 +10,8 @@ const { generateArticleContent, generateVideoScenesJSON } = require('../utils/ge
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
 const VIDEO_BOT_URLS = [
-    "http://185.190.140.189:3001"
+    "http://185.190.140.189:3001",
+    "https://unreeling-playgroup-relation.ngrok-free.dev"
 ];
 
 // Clave para comunicar con los bots (si la usan)
@@ -329,7 +330,9 @@ async function _triggerVideoBotWithRotation(article) {
             
             // Le mandamos todo el objeto payload_escenas al bot de Python
             const response = await axios.post(`${targetBotUrl}/generate_video`, payload_escenas, { 
-                headers: { 'x-api-key': VIDEO_BOT_KEY },
+                headers: { 'x-api-key': VIDEO_BOT_KEY,
+                    'ngrok-skip-browser-warning': 'true'
+                 },
                 timeout: 10000 
             });
 
