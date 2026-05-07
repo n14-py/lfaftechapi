@@ -7,10 +7,10 @@ const Article = require('../models/article');
 const { generateArticleContent, generateVideoScenesJSON } = require('../utils/geminiClient');
 
 // ============================================================================
-// ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 1 es short
+// ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
 const VIDEO_BOT_URLS = [
-    "http://3.22.170.219:3001"
+    "http://3.17.59.250:3001"
 ];
 
 // Clave para comunicar con los bots (si la usan)
