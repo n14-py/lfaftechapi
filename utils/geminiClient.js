@@ -29,6 +29,7 @@ if (apiKeys.length === 0) {
 let currentKeyIndex = 0;
 
 // Función para obtener el modelo con la clave actual
+// Función para obtener el modelo con la clave actual
 function getModel() {
     // Protección por si no hay keys
     if (apiKeys.length === 0) throw new Error("No API Keys available");
@@ -36,14 +37,14 @@ function getModel() {
     const currentKey = apiKeys[currentKeyIndex];
     const genAI = new GoogleGenerativeAI(currentKey);
     
-    // Usamos el modelo 2.5 Flash (o 1.5-flash si prefieres)
+    // Usamos el modelo con los filtros apagados al máximo (BLOCK_NONE)
     return genAI.getGenerativeModel({ 
         model: "gemma-4-31b-it", 
         safetySettings: [
-            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
         ]
     });
 }
@@ -452,6 +453,13 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
 
     } catch (error) {
         console.error(`  [Gemini Director] Error al crear/parsear escenas JSON: ${error.message}`);
-        return null;
+        
+        // PARCHE ANTI-BUCLE: Si la IA bloquea el contenido, enviamos una señal clara de muerte
+        if (error.message && error.message.includes('PROHIBITED_CONTENT')) {
+            console.error("  [Gemini Director] ⛔ CONTENIDO CENSURADO POR GOOGLE. Abortando noticia definitivamente.");
+            return { error_fatal: "PROHIBITED_CONTENT" }; 
+        }
+
+        return null; // Error normal (ej. mal JSON), se puede reintentar
     }
 };

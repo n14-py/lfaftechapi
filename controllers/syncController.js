@@ -302,10 +302,18 @@ async function _triggerVideoBotWithRotation(article) {
     }
 
     // --- ¡MAGIA DE ESCENAS AQUÍ! ---
-    // Llamamos a Gemini para que pique el artículo largo en un JSON de 15 escenas
     console.log(`[VideoBot] 🧠 Construyendo guion de escenas para: ${articleCheck.titulo}...`);
     let payload_escenas = await generateVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);
-    // Si Gemini falla al armar el JSON, devolvemos el artículo a 'pending' para reintentar luego
+    
+    // --- NUEVO BLINDAJE ANTI-CENSURA ---
+    if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
+        console.error(`[VideoBot] 🗑️ Descartando noticia tóxica/censurada para no atascar el servidor.`);
+        articleCheck.videoProcessingStatus = 'rejected_policy'; // ¡La marcamos como rechazada, NO vuelve a pending!
+        await articleCheck.save();
+        return;
+    }
+
+    // Si Gemini falla al armar el JSON por otro error temporal, devolvemos el artículo a 'pending'
     if (!payload_escenas || !payload_escenas.scenes || payload_escenas.scenes.length === 0) {
         console.error(`[VideoBot] ❌ Falló la generación de escenas JSON. Regresando a pendiente.`);
         articleCheck.videoProcessingStatus = 'pending';
