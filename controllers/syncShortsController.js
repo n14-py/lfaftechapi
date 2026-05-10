@@ -451,15 +451,22 @@ async function _runShortsWorker() {
                 console.log(`[Shorts Worker] 💾 Short Guardado en DB: ${newArticle.titulo}`);
                 
                 // 5. INTENTO INMEDIATO DE VIDEO
+// 5. INTENTO INMEDIATO DE VIDEO
                 await _triggerShortBotWithRotation(newArticle);
                 
             } else {
                 console.warn(`[Shorts Worker] ⚠️ Fallo IA Shorts. Saltando.`);
             }
             
-            await sleep(2000); 
+            // --- BLINDAJE ANTI-SPAM (8 a 10 MINUTOS DE ESPERA) ---
+            // Genera un número aleatorio entre 8 y 10
+            const minutosEspera = Math.floor(Math.random() * (10 - 8 + 1)) + 8;
+            console.log(`[Shorts Worker] ⏳ Pausa de seguridad anti-spam: Esperando ${minutosEspera} minutos antes de crear el siguiente Short...`);
+            await sleep(minutosEspera * 60 * 1000); 
 
         } catch (error) {
+
+            
             console.error(`[Shorts Worker] Error Ciclo Principal: ${error.message}`);
             await sleep(10 * 1000); 
         }
