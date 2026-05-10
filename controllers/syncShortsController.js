@@ -289,26 +289,43 @@ async function _triggerShortBotWithRotation(article) {
         return;
     }
 
-    // --- ¡MAGIA DE ESCENAS AQUÍ! ---
-    console.log(`[ShortBot] 🧠 Construyendo guion de escenas para: ${articleCheck.titulo}...`);
-let payload_escenas = await generateShortVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);    
-    // --- NUEVO BLINDAJE ANTI-CENSURA ---
-    if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
-        console.error(`[ShortBot] 🗑️ Descartando noticia tóxica/censurada para no atascar el servidor.`);
-        articleCheck.videoProcessingStatus = 'rejected_policy'; // ¡Se rechaza permanentemente!
+   // --- ¡SISTEMA DE CACHÉ DE ESCENAS SHORTS! ---
+    let payload_escenas;
+
+    if (articleCheck.escenasJSON && articleCheck.escenasJSON.scenes) {
+        // SI YA EXISTE, LO RECICLAMOS (Ahorramos Gemini)
+        console.log(`[ShortBot] ♻️ Reutilizando MEGA JSON guardado en caché para: ${articleCheck.titulo}`);
+        payload_escenas = articleCheck.escenasJSON;
+    } else {
+        // SI NO EXISTE, LO CREAMOS Y LO GUARDAMOS
+        console.log(`[ShortBot] 🧠 Construyendo nuevo guion de escenas con IA para: ${articleCheck.titulo}...`);
+        payload_escenas = await generateShortVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);
+        
+        // --- BLINDAJE ANTI-CENSURA ---
+        if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
+            console.error(`[ShortBot] 🗑️ Descartando noticia tóxica/censurada para no atascar el servidor.`);
+            articleCheck.videoProcessingStatus = 'rejected_policy'; // ¡Se rechaza permanentemente!
+            await articleCheck.save();
+            return;
+        }
+
+        if (!payload_escenas || !payload_escenas.scenes || payload_escenas.scenes.length === 0) {
+            console.error(`[ShortBot] ❌ Falló la generación de escenas JSON. Regresando a pendiente.`);
+            articleCheck.videoProcessingStatus = 'pending_short';
+            await articleCheck.save();
+            return;
+        }
+
+        // GUARDAMOS EL JSON EN LA BASE DE DATOS PARA FUTUROS INTENTOS
+        articleCheck.escenasJSON = payload_escenas;
         await articleCheck.save();
-        return;
+        console.log(`[ShortBot] 💾 MEGA JSON de Short guardado en la base de datos exitosamente.`);
     }
 
-    if (!payload_escenas || !payload_escenas.scenes || payload_escenas.scenes.length === 0) {
-        console.error(`[ShortBot] ❌ Falló la generación de escenas JSON. Regresando a pendiente.`);
-        articleCheck.videoProcessingStatus = 'pending_short';
-        await articleCheck.save();
-        return;
-    }
-
+    // Le inyectamos el ID de la base de datos al JSON para que Python sepa a quién pertenece
     payload_escenas.article_id = articleCheck._id;
 
+    
     let attempts = 0;
     let sent = false;
 
