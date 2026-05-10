@@ -4,9 +4,8 @@
 const axios = require('axios');
 const Article = require('../models/article');
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
-const { generateShortArticleContent } = require('../utils/geminiClient');
-
-// ============================================================================
+// Importamos el cliente Gemini Rotativo adaptado para Shorts
+const { generateShortArticleContent, generateShortVideoScenesJSON } = require('../utils/geminiClient');// ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
@@ -280,8 +279,8 @@ async function _triggerShortBotWithRotation(article) {
 
     // --- LA MAGIA: BLOQUEO ATÓMICO ---
     const articleCheck = await Article.findOneAndUpdate(
-        { _id: article._id, videoProcessingStatus: 'pending_short' }, // <-- Aquí
-        { $set: { videoProcessingStatus: 'processing_short' } },      // <-- Aquí
+        { _id: article._id, videoProcessingStatus: 'pending_short' },
+        { $set: { videoProcessingStatus: 'processing_short' } },
         { new: true }
     );
 
@@ -290,38 +289,50 @@ async function _triggerShortBotWithRotation(article) {
         return;
     }
 
-    // Intentamos con hasta 3 bots diferentes si el primero falla (igual que el original)
+    // --- ¡MAGIA DE ESCENAS AQUÍ! ---
+    console.log(`[ShortBot] 🧠 Construyendo guion de escenas para: ${articleCheck.titulo}...`);
+let payload_escenas = await generateShortVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);    
+    // --- NUEVO BLINDAJE ANTI-CENSURA ---
+    if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
+        console.error(`[ShortBot] 🗑️ Descartando noticia tóxica/censurada para no atascar el servidor.`);
+        articleCheck.videoProcessingStatus = 'rejected_policy'; // ¡Se rechaza permanentemente!
+        await articleCheck.save();
+        return;
+    }
+
+    if (!payload_escenas || !payload_escenas.scenes || payload_escenas.scenes.length === 0) {
+        console.error(`[ShortBot] ❌ Falló la generación de escenas JSON. Regresando a pendiente.`);
+        articleCheck.videoProcessingStatus = 'pending_short';
+        await articleCheck.save();
+        return;
+    }
+
+    payload_escenas.article_id = articleCheck._id;
+
     let attempts = 0;
     let sent = false;
 
     while (!sent && attempts < 3) {
-        // Seleccionar Bot (Round Robin)
         const targetBotUrl = SHORT_BOT_URLS[currentShortBotIndex];
         currentShortBotIndex = (currentShortBotIndex + 1) % SHORT_BOT_URLS.length;
 
         try {
             await _wakeUpShortBot(targetBotUrl);
-
-            const payload = {
-                text: articleCheck.articuloGenerado, 
-                title: articleCheck.titulo,            
-                image_url: articleCheck.imagen, 
-                article_id: articleCheck._id,
-                category: articleCheck.categoria // Será "Shorts"
-            };
-
-            console.log(`[ShortBot] 📡 Enviando Short a ${targetBotUrl} (Intento ${attempts+1})...`);
             
-            const response = await axios.post(`${targetBotUrl}/generate_video`, payload, { 
-                headers: { 'x-api-key': VIDEO_BOT_KEY },
+            console.log(`[ShortBot] 🚀 Enviando MEGA JSON de ${payload_escenas.scenes.length} escenas a ${targetBotUrl} (Intento ${attempts+1})...`);
+            
+            const response = await axios.post(`${targetBotUrl}/generate_video`, payload_escenas, { 
+                headers: { 
+                    'x-api-key': VIDEO_BOT_KEY,
+                    'ngrok-skip-browser-warning': 'true' // Heredado de la versión original
+                },
                 timeout: 10000 
             });
 
-            if (response.status === 200) {
-                console.log(`[ShortBot] ✅ Short aceptado por ${targetBotUrl}.`);
+            if (response.status === 200 || response.status === 202) {
+                console.log(`[ShortBot] ✅ Tarea aceptada por ${targetBotUrl}. Renderizado VERTICAL en curso.`);
                 sent = true;
             }
-
         } catch (error) {
             const status = error.response ? error.response.status : 'RED';
             console.warn(`[ShortBot] ⚠️ Fallo en ${targetBotUrl} (Status: ${status}). Probando siguiente...`);
@@ -332,7 +343,7 @@ async function _triggerShortBotWithRotation(article) {
 
     if (!sent) {
         console.error(`[ShortBot] ❌ Ningún bot aceptó el Short. Volviendo a 'pending' para luego.`);
-        articleCheck.videoProcessingStatus = 'pending_short'; // <-- Aquí
+        articleCheck.videoProcessingStatus = 'pending_short';
         await articleCheck.save();
     }
 }

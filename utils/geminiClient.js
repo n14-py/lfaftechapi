@@ -463,3 +463,89 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
         return null; // Error normal (ej. mal JSON), se puede reintentar
     }
 };
+
+
+
+
+
+// ============================================================================
+// ⏱️ CREADOR DE ESCENAS PARA SHORTS (DIRECTOR VERTICAL ESTRICTO 85 SEGUNDOS)
+// ============================================================================
+exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, articleId) => {
+    // Tomamos menos contexto porque un Short es más resumido
+    const contexto = textoLargo.substring(0, 3000);
+
+    const prompt = `Eres el Director TÉCNICO de un canal de YouTube Shorts automatizado. Tu trabajo es transformar el texto de una noticia en un guion JSON estricto para un motor de renderizado FFmpeg vertical.
+
+    NOTICIA A CONVERTIR:
+    Título: "${titulo}"
+    Texto: "${contexto}"
+    Imagen Principal: "${imagenPrincipal}"
+
+    REGLAS ABSOLUTAS Y CRÍTICAS (SI FALLAS, EL SISTEMA EXPLOTARÁ):
+    1. El campo "text" en TODAS las escenas es ÚNICA Y EXCLUSIVAMENTE lo que el locutor va a decir en voz alta (TTS). ¡NUNCA pongas descripciones de cámara!
+    2. Si la escena es "type": "pexels", es OBLIGATORIO incluir "termino_busqueda" con 2 o 3 palabras clave EN INGLÉS.
+    3. Si la escena es "type": "body", NO incluyas "termino_busqueda", pero SÍ debes incluir "image_url" con la Imagen Principal.
+    4. MAPAS: Si la noticia menciona un lugar clave, incluye MÁXIMO UNA escena con "type": "mapa" y la variable "ubicacion".
+    5. CANTIDAD DE ESCENAS (¡CRÍTICO!): Debes generar EXACTAMENTE entre 9 y 10 escenas en total (1 intro y 8 o 9 de desarrollo). Esto es VITAL para que el Short dure exactamente 85 segundos.
+    6. LONGITUD DEL TEXTO: La "intro" debe tener máximo 15 palabras. Las demás escenas deben tener EXACTAMENTE entre 20 y 25 palabras cada una. El total de palabras de todos los "text" sumados DEBE estar entre 210 y 220 palabras.
+    7. DEVUELVE ÚNICAMENTE UN JSON VÁLIDO. SIN MARKDOWN, SIN TEXTO EXTRA.
+
+    DICCIONARIO DE VARIABLES PERMITIDAS:
+    - "type": "intro", "body", "pexels", "mapa".
+    - "layout_category": "hombre", "mujer", "sin_presentador".
+    - "voice": "hombre_1", "mujer_1".
+    - "bgm_mood": "urgencia", "analisis", "tension".
+    - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia".
+
+    FORMATO JSON EXACTO QUE DEBES REPLICAR:
+    {
+      "youtube_title": "Título llamativo para Shorts #shorts",
+      "youtube_description": "Descripción optimizada...",
+      "youtube_tags": ["tag1", "tag2", "shorts"],
+      "scenes": [
+         // ... AQUÍ TUS 9 a 10 ESCENAS ...
+      ]
+    }`;
+
+    try {
+        console.log(`  [Gemini Shorts Director] Calculando métricas... Creando JSON para Short de 85s...`);
+        let jsonText = await generateContentWithRetry(prompt);
+        
+        jsonText = jsonText.replace(/\`\`\`json/gi, '').replace(/\`\`\`/g, '').trim();
+        
+        const inicioJson = jsonText.indexOf('{');
+        const finJson = jsonText.lastIndexOf('}');
+        
+        if (inicioJson === -1 || finJson === -1) {
+            throw new Error("La IA no devolvió llaves de JSON válidas.");
+        }
+        
+        const jsonLimpio = jsonText.substring(inicioJson, finJson + 1);
+        const payloadParseado = JSON.parse(jsonLimpio);
+        
+        const noticiaRecortada = textoLargo.substring(0, 800); // Descripción más corta para Shorts
+        const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
+        
+        payloadParseado.youtube_description = `👉 ¡Suscríbete para más noticias!\n🌐 Lee la nota completa: ${urlArticulo}\n\n#shorts #noticias\n\n` + noticiaRecortada;
+
+        // Parche anti "n" para FFmpeg
+        if (payloadParseado.scenes) {
+            payloadParseado.scenes.forEach(escena => {
+                if (escena.text) {
+                    escena.text = escena.text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+                }
+            });
+        }
+
+        return payloadParseado;
+
+    } catch (error) {
+        console.error(`  [Gemini Shorts Director] Error al crear JSON: ${error.message}`);
+        if (error.message && error.message.includes('PROHIBITED_CONTENT')) {
+            console.error("  [Gemini Shorts Director] ⛔ CONTENIDO CENSURADO. Abortando.");
+            return { error_fatal: "PROHIBITED_CONTENT" }; 
+        }
+        return null;
+    }
+};
