@@ -168,9 +168,10 @@ ${promptContexto}
 Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones ni saludos, NO uses Markdown (negritas/cursivas) en los encabezados.
 
 Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
-Línea 2: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
-Línea 3: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
-Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
+Línea 2: PAÍS: [Código ISO de 2 letras del país de la noticia. Ej: py, mx, bo, ar. Si es global pon general]
+Línea 3: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
+Línea 4: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
+Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
 
     try {
         // LLAMADA CON SISTEMA DE ROTACIÓN
@@ -185,7 +186,7 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
         
         if (tituloIndex > 0) {
             // Tijera: Nos quedamos solo con lo que importa. El índice - 1 es la Categoría.
-            lines = lines.slice(tituloIndex - 1); 
+            lines = lines.slice(tituloIndex - 2); 
         }
         // ----------------------------------------------
 
@@ -194,6 +195,7 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
              console.warn("⚠️ [Gemini] Formato incorrecto o texto destruido, usando fallback simple.");
              return { 
                  categoria: "general", 
+                 paisIA: "general",
                  tituloViral: title, 
                  textoImagen: title.split(' ').slice(0, 4).join(' '),
                  articuloGenerado: fullText 
@@ -202,35 +204,42 @@ Línea 4: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
 
         // 3. Limpieza de Extrema Precisión (Regex)
         // cleanCategory asumo que ya lo tienes definido arriba en tu código
+// 3. Limpieza de Extrema Precisión (Regex)
         let categoria = cleanCategory(lines[0]);
         
-        // Extraemos el título destruyendo: la etiqueta, los asteriscos, las comillas y los espacios muertos
-        let tituloViral = lines[1]
+        // NUEVO: Extraemos el código de país de la Línea 1
+        let paisIA = lines[1]
+            .replace(/.*PAÍS:\s*/i, '')
+            .replace(/[\*"]/g, '')
+            .trim().toLowerCase().substring(0, 2);
+        
+        if (!paisIA) paisIA = 'general';
+        
+        let tituloViral = lines[2]
             .replace(/.*TÍTULO VIRAL:\s*/i, '')
             .replace(/[\*"]/g, '')
             .trim();
         
-        // Extraemos el texto de imagen destruyendo basura igual que arriba
-        let textoImagen = lines[2]
+        let textoImagen = lines[3]
             .replace(/.*TEXTO IMAGEN:\s*/i, '')
             .replace(/[\*"]/g, '')
             .trim();
         
-        // Filtro de seguridad por si la IA hizo un texto de imagen ridículamente largo
         if (textoImagen.length > 60 || textoImagen.length < 4) {
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
-        // Unimos todas las líneas restantes como el cuerpo de la noticia (soporta párrafos)
-        const articuloGenerado = lines.slice(3).join('\n').trim();
+        // El cuerpo ahora empieza desde el índice 4
+        const articuloGenerado = lines.slice(4).join('\n').trim();
 
-        console.log(`✅ [Gemini] Noticia generada OK: "${tituloViral.substring(0,30)}..."`);
+        console.log(`✅ [Gemini] Noticia generada OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,30)}..."`);
         
         return {
             categoriaSugerida: categoria, 
-            categoria: categoria,       
+            categoria: categoria, // Se guarda en tu campo 'categoria'
+            pais: paisIA,         // REEMPLAZO: Usamos 'pais' para que caiga directo en tu BD
             tituloViral: tituloViral,
-            textoImagen: textoImagen,
+            textoImagen: tituloViral.split(' ').slice(0, 4).join(' '), // Salvavidas para el texto de imagen
             articuloGenerado: articuloGenerado
         };
 
@@ -547,5 +556,65 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
             return { error_fatal: "PROHIBITED_CONTENT" }; 
         }
         return null;
+    }
+};
+
+
+
+
+// ============================================================================
+// 🧠 GENERADOR DE RESUMEN CORTO (CON ESCUDO ANTI-PENSAMIENTOS)
+// ============================================================================
+exports.generateSummaryWithGemini = async (textoLargo) => {
+    // Limitamos el texto a 8000 caracteres para no gastar demasiados tokens innecesarios
+    const contexto = textoLargo.substring(0, 8000);
+
+    const prompt = `Actúa como un editor jefe de un periódico digital. Tu tarea es hacer un resumen conciso, directo y muy atractivo de la siguiente noticia.
+
+NOTICIA:
+"${contexto}"
+
+--- REGLAS ESTRICTAS DE SALIDA (¡CRÍTICO!) ---
+¡PROHIBIDO PENSAR EN VOZ ALTA! NO generes borradores, "scratchpads", procesos iterativos ("Drafting..."), ni repitas las restricciones ("Constraints:"). TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EL RESULTADO FINAL.
+Tu respuesta debe ser un resumen de máximo 2 o 3 párrafos cortos.
+Debes iniciar tu respuesta EXACTAMENTE con esta frase ancla (en mayúsculas):
+RESUMEN FINAL:
+[Escribe el resumen a continuación, sin asteriscos, sin negritas, sin viñetas y sin textos extra]`;
+
+    try {
+        console.log(`  [Gemini Resumen] Generando resumen inteligente (Evadiendo pensamientos)...`);
+        
+        // Llamada blindada con el sistema de rotación de Keys
+        const fullText = await generateContentWithRetry(prompt);
+
+        // Separamos por líneas limpias
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
+
+        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS ---
+        // Buscamos de ABAJO hacia ARRIBA la palabra ancla
+        const resumenIndex = lines.findLastIndex(l => l.toUpperCase().includes('RESUMEN FINAL:'));
+
+        let resumenLimpio = "";
+        if (resumenIndex !== -1) {
+            // Nos quedamos solo con lo que está DEBAJO de "RESUMEN FINAL:" o en esa misma línea
+            let tempLines = lines.slice(resumenIndex);
+            
+            // Borramos la palabra ancla para que solo quede el texto limpio
+            tempLines[0] = tempLines[0].replace(/.*RESUMEN FINAL:\s*/i, '').replace(/[\*"]/g, '').trim();
+            
+            resumenLimpio = tempLines.join('\n\n').trim();
+        } else {
+            // Salvavidas: Si la IA rebelde ignoró el ancla, agarramos los últimos 3 párrafos (que suele ser el resultado final)
+            console.warn("⚠️ [Gemini Resumen] No se encontró el ancla, usando fallback de últimos párrafos.");
+            resumenLimpio = lines.slice(-3).join('\n\n').trim();
+            resumenLimpio = resumenLimpio.replace(/[\*"]/g, ''); // Limpiar asteriscos
+        }
+
+        console.log(`✅ [Gemini Resumen] Resumen generado exitosamente.`);
+        return resumenLimpio || null;
+
+    } catch (error) {
+        console.error(`❌ [Gemini Resumen] Error al generar resumen:`, error.message);
+        return null; // Retornamos null para que el controlador no guarde errores en la Base de Datos
     }
 };

@@ -4,7 +4,7 @@
 const mongoose = require('mongoose');
 const Article = require('../models/article');
 const { publicarUnArticulo } = require('../utils/telegramBot'); 
-
+const { generateSummaryWithGemini } = require('../utils/geminiClient');
 // --- IMPORTANTE: TRAEMOS LA FUNCIÓN DE ALERTA DEL SYNCCONTROLLER ---
 const { reportQuotaLimitReached } = require('./syncController');
 
@@ -156,6 +156,54 @@ exports.getFeedArticles = async (req, res) => {
 };
 
 
+
+
+/**
+ * [PÚBLICO] Obtener Resumen con IA (Lógica de una sola ejecución)
+ * Si ya existe en la DB, lo devuelve. Si no, lo genera, lo guarda y lo entrega.
+ */
+exports.getAISummary = async (req, res) => {
+    try {
+        const articleId = req.params.id;
+        if (!mongoose.Types.ObjectId.isValid(articleId)) {
+            return res.status(400).json({ error: "ID inválido." });
+        }
+
+        const article = await Article.findById(articleId);
+        if (!article) {
+            return res.status(404).json({ error: "Artículo no encontrado." });
+        }
+
+        // 🟢 PASO 1: Verificar si ya lo tenemos guardado
+        if (article.aiSummary && article.aiSummary.trim() !== "") {
+            console.log(`[IA] Entregando resumen guardado para: ${articleId}`);
+            return res.json({ summary: article.aiSummary });
+        }
+
+        // 🔴 PASO 2: Si no existe, llamar a Gemini por única vez
+        console.log(`[IA] Generando nuevo resumen para: ${article.titulo}`);
+        
+        // Usamos el 'articuloGenerado' (que es el texto largo) para resumir
+        const nuevoResumen = await generateSummaryWithGemini(article.articuloGenerado);
+
+        if (nuevoResumen) {
+            // Guardamos permanentemente en la base de datos
+            article.aiSummary = nuevoResumen;
+            await article.save();
+            
+            return res.json({ summary: nuevoResumen });
+        } else {
+            return res.status(500).json({ error: "La IA no devolvió un resumen válido." });
+        }
+
+    } catch (error) {
+        console.error("Error en getAISummary:", error);
+        res.status(500).json({ error: "Error interno al procesar el resumen con IA." });
+    }
+};
+
+
+
 // ============================================================================
 // 🔥 CALLBACKS DEL BOT DE VIDEO (AQUÍ ESTÁ LA MAGIA)
 // ============================================================================
@@ -166,29 +214,30 @@ exports.getFeedArticles = async (req, res) => {
  */
 exports.videoCompleteCallback = async (req, res) => {
     try {
-        const { articleId, youtubeId } = req.body;
+        // AHORA TAMBIÉN RECIBIMOS LA URL DE CLOUDFLARE
+        const { articleId, youtubeId, videoUrl } = req.body;
         
-        if (!articleId || !youtubeId) return res.status(400).json({ error: "Datos incompletos" });
+        if (!articleId) return res.status(400).json({ error: "Datos incompletos" });
 
         const article = await Article.findById(articleId);
         if (!article) return res.status(404).json({ error: "Artículo no encontrado" });
 
-        // 1. Guardamos el ID de YouTube y estado
+        // 1. Guardamos el ID de YouTube, la URL de Cloudflare y el estado
         article.videoProcessingStatus = 'complete';
-        article.youtubeId = youtubeId;
+        if (youtubeId) article.youtubeId = youtubeId;
+        if (videoUrl) article.videoUrl = videoUrl; // ¡Guardado para Shorts!
         
         // 2. ¡IMPORTANTE! Guardamos antes de publicar
         await article.save();
-        console.log(`[Callback] ✅ Video listo para: ${article.titulo} (ID: ${youtubeId})`);
+        console.log(`[Callback] ✅ Video listo para: ${article.titulo}`);
         
         // 3. --- DISPARAR PUBLICACIÓN A TELEGRAM AHORA ---
         if (!article.telegramPosted) {
             console.log(`[Callback] Publicando en Telegram...`);
             try {
                 await publicarUnArticulo(article);
-                // La función publicarUnArticulo ya se encarga de marcar 'telegramPosted = true'
             } catch (tgError) {
-                console.error(`[Callback] Error al publicar en Telegram (no crítico): ${tgError.message}`);
+                console.error(`[Callback] Error al publicar en Telegram: ${tgError.message}`);
             }
         }
 
@@ -200,6 +249,34 @@ exports.videoCompleteCallback = async (req, res) => {
     }
 };
 
+/**
+ * [PRIVADO] ÉXITO AUDIO: El Bot terminó de narrar el MP3
+ */
+exports.audioCompleteCallback = async (req, res) => {
+    try {
+        const { articleId, audioUrl, error } = req.body;
+        if (!articleId) return res.status(400).json({ error: "Falta articleId" });
+
+        const article = await Article.findById(articleId);
+        if (!article) return res.status(404).json({ error: "Artículo no encontrado" });
+
+        if (error) {
+            console.error(`[Callback Audio] ❌ Falló el audio para ${article.titulo}: ${error}`);
+            return res.json({ success: false, message: `Error reportado` });
+        }
+
+        if (audioUrl) {
+            article.audioUrl = audioUrl; // ¡Guardado para escuchar la noticia!
+            await article.save();
+            console.log(`[Callback Audio] 🎧 MP3 Listo y guardado para: ${article.titulo}`);
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Error en audioCompleteCallback:", error);
+        res.status(500).json({ error: "Error interno." });
+    }
+};
 /**
  * [PRIVADO] FALLO: El Bot no pudo hacer el video.
  * ACCIÓN: Marcar como fallido (y NO publicar en Telegram).

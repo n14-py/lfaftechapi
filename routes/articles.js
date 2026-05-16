@@ -73,6 +73,9 @@ router.get('/articles', cacheMiddleware, articleController.getArticles);
 // Leer una noticia específica
 router.get('/article/:id', articleController.getArticleById);
 
+// Ruta para obtener el resumen generado por IA (resuelve el "resumir una sola vez")
+router.get('/article/:id/ai-summary', articleController.getAISummary);
+
 // GET /api/articles/recommended
 // Noticias relacionadas (sin caché para variar)
 router.get('/articles/recommended', articleController.getRecommendedArticles);
@@ -106,6 +109,8 @@ router.post('/articles', requireAdminKey, syncController.createManualArticle);
 // POST /api/articles/video_complete
 // El bot llama aquí cuando TERMINA un video y te manda el ID de YouTube
 router.post('/articles/video_complete', requireAdminKey, articleController.videoCompleteCallback);
+
+router.post('/audio_complete', requireAdminKey, articleController.audioCompleteCallback);
 
 // POST /api/articles/video_failed
 // El bot llama aquí si FALLA (cuota, error, etc.)

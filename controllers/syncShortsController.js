@@ -454,7 +454,7 @@ async function _runShortsWorker() {
                     imagen: articleToProcess.image || 'https://via.placeholder.com/800x600', 
                     sitio: 'noticias.lat',
                     categoria: resultadoIA.categoria, // <-- ¡LA IA DECIDE LA CATEGORÍA AQUÍ!
-                    pais: articleToProcess.paisLocal,
+                    pais: resultadoIA.paisIA && resultadoIA.paisIA !== 'general' ? resultadoIA.paisIA : articleToProcess.paisLocal,
                     fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url + "#short", // Nuestra marca secreta para el sistema
                     fecha: new Date(articleToProcess.publishedAt || Date.now()),

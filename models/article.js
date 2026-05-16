@@ -36,14 +36,11 @@ const ArticleSchema = new mongoose.Schema({
         index: true 
     },
 // El ID del video de YouTube (ej: dQw4w9WgXcQ)
-    youtubeId: { type: String, sparse: true },
-    // --- FIN DE CAMPOS DE YOUTUBE ---
 
-    // --- CACHÉ DE ESCENAS (Para ahorrar API de Gemini) ---
-    escenasJSON: { 
-        type: Object, 
-        default: null 
-    },
+    youtubeId: { type: String, default: null },
+    videoUrl: { type: String, default: null }, // Nuevo: URL del video en Cloudflare
+    audioUrl: { type: String, default: null }, // Nuevo: URL del audio en Cloudflare
+    escenasJSON: { type: Object, default: null },
 
     fuente: String,
 

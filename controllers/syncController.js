@@ -379,6 +379,38 @@ async function _triggerVideoBotWithRotation(article) {
 }
 
 
+
+
+// ============================================================================
+// 🎧 MICROSERVICIO: PEDIR AUDIO A PYTHON
+// ============================================================================
+async function _triggerAudioBot(article) {
+    if (VIDEO_BOT_URLS.length === 0) return;
+    
+    // Usamos el mismo bot rotativo o el primero
+    const targetBotUrl = VIDEO_BOT_URLS[0]; 
+    
+    try {
+        const payload = {
+            articleId: article._id,
+            texto: article.articuloGenerado
+        };
+        console.log(`[AudioBot] 🎙️ Solicitando locución MP3 a ${targetBotUrl}...`);
+        
+        await axios.post(`${targetBotUrl}/api/tasks/audio`, payload, {
+            headers: { 
+                'x-api-key': VIDEO_BOT_KEY,
+                'ngrok-skip-browser-warning': 'true'
+            },
+            timeout: 5000 // Solo esperamos que acepte la tarea (retorna 202)
+        });
+    } catch (e) {
+        console.error(`[AudioBot] ⚠️ Error enviando solicitud de audio: ${e.message}`);
+    }
+}
+
+
+
 // ============================================================================
 // 🏭 7. EL WORKER PRINCIPAL (CONTROL DE FLUJO)
 // ============================================================================
@@ -472,7 +504,7 @@ async function _runNewsWorker() {
                     imagen: articleToProcess.image || 'https://via.placeholder.com/800x600', 
                     sitio: 'noticias.lat',
                     categoria: categoria,
-                    pais: articleToProcess.paisLocal,
+                    pais: paisIA && paisIA !== 'general' ? paisIA : articleToProcess.paisLocal,
                     fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt || Date.now()),
@@ -487,6 +519,8 @@ async function _runNewsWorker() {
                 
                 // 5. INTENTO INMEDIATO DE VIDEO
                 // Intentamos enviarla a un bot ya mismo
+                _triggerAudioBot(newArticle);
+
                 await _triggerVideoBotWithRotation(newArticle);
                 
             } else {
