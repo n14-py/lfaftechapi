@@ -322,7 +322,8 @@ ${promptContexto}
 - Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
 - Redacción clara, informativa y coherente
 
---- REGLAS ESTRICTAS DE SALIDA ---
+--- REGLAS ESTRICTAS DE SALIDA (¡CRÍTICO!) ---
+¡PROHIBIDO PENSAR EN VOZ ALTA! NO generes borradores, "scratchpads", ni resúmenes en inglés ("Source Content:"). TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EN ESPAÑOL CON EL RESULTADO FINAL.
 Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
 
 Línea 1: [Categoría real de la noticia. Ej: Política, Economía, Tecnología, Deportes, etc.]
@@ -336,14 +337,25 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
 
     try {
         const fullText = await generateContentWithRetry(prompt);
-        const lines = fullText.split('\n').filter(line => line.trim() !== '');
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        if (lines.length < 4) return null;
+        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS ---
+        // Buscamos de ABAJO hacia ARRIBA para saltarnos todo el monólogo inicial en inglés
+        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
+        
+        if (tituloIndex > 0) {
+            lines = lines.slice(tituloIndex - 1); 
+        }
+
+        if (lines.length < 4) {
+             console.warn("⚠️ [Gemini Shorts] Formato incorrecto o texto destruido, ignorando generación.");
+             return null;
+        }
 
         // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
         let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
-        let tituloProfesional = lines[1].replace(/^TÍTULO PROFESIONAL:/i, '').replace(/^"|"$/g, '').trim();
-        let textoImagen = lines[2].replace(/^TEXTO IMAGEN:/i, '').replace(/^"|"$/g, '').trim();
+        let tituloProfesional = lines[1].replace(/.*TÍTULO PROFESIONAL:\s*/i, '').replace(/[\*"]/g, '').trim();
+        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/[\*"]/g, '').trim();
         const articuloGenerado = lines.slice(3).join('\n').trim();
         
         return {

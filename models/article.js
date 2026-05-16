@@ -31,7 +31,7 @@ const ArticleSchema = new mongoose.Schema({
     videoProcessingStatus: { 
         type: String, 
         // ¡Agregamos los estados exclusivos para Shorts!
-        enum: ['pending', 'processing', 'complete', 'failed', 'pending_short', 'processing_short'], 
+        enum: ['pending', 'processing', 'complete', 'failed', 'pending_short', 'processing_short,', 'rejected_policy'], 
         default: 'pending', 
         index: true 
     },
