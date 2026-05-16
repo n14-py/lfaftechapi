@@ -110,8 +110,7 @@ router.post('/articles', requireAdminKey, syncController.createManualArticle);
 // El bot llama aquí cuando TERMINA un video y te manda el ID de YouTube
 router.post('/articles/video_complete', requireAdminKey, articleController.videoCompleteCallback);
 
-router.post('/audio_complete', requireAdminKey, articleController.audioCompleteCallback);
-
+router.post('/articles/audio_complete', requireAdminKey, articleController.audioCompleteCallback);
 // POST /api/articles/video_failed
 // El bot llama aquí si FALLA (cuota, error, etc.)
 router.post('/articles/video_failed', requireAdminKey, articleController.videoFailedCallback);

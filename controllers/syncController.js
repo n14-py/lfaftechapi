@@ -4,8 +4,7 @@
 const axios = require('axios');
 const Article = require('../models/article');
 // Importamos el cliente Gemini Rotativo (asegurate de haber actualizado geminiClient.js)
-const { generateArticleContent, generateVideoScenesJSON } = require('../utils/geminiClient');
-
+const { generateArticleContent, generateVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
 // ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
@@ -494,9 +493,13 @@ async function _runNewsWorker() {
                 description: articleToProcess.description
             });
 
-            if (resultadoIA && resultadoIA.articuloGenerado) {
+ if (resultadoIA && resultadoIA.articuloGenerado) {
                 const { categoria, tituloViral, articuloGenerado, textoImagen } = resultadoIA;
                 
+                // --- NUEVO: GENERAR RESUMEN IA AL INSTANTE ---
+                console.log(`[News Worker] 🤖 Generando resumen instantáneo para: ${tituloViral || articleToProcess.title}`);
+                const resumenIA = await generateSummaryWithGemini(articuloGenerado);
+
                 // Guardamos en Base de Datos
                 const newArticle = new Article({
                     titulo: tituloViral || articleToProcess.title, 
@@ -504,17 +507,19 @@ async function _runNewsWorker() {
                     imagen: articleToProcess.image || 'https://via.placeholder.com/800x600', 
                     sitio: 'noticias.lat',
                     categoria: categoria,
-                    pais: resultadoIA.pais && resultadoIA.pais !== 'general' ? resultadoIA.pais : articleToProcess.paisLocal,                    fuente: articleToProcess.source.name,
+                    pais: resultadoIA.pais && resultadoIA.pais !== 'general' ? resultadoIA.pais : articleToProcess.paisLocal,
+                    fuente: articleToProcess.source.name,
                     enlaceOriginal: articleToProcess.url,
                     fecha: new Date(articleToProcess.publishedAt || Date.now()),
                     articuloGenerado: articuloGenerado,
                     imageText: textoImagen, // Guardamos el texto para la miniatura
+                    aiSummary: resumenIA, // <--- GUARDAMOS EL RESUMEN AQUÍ
                     telegramPosted: false,
                     videoProcessingStatus: 'pending' // <--- IMPORTANTE: Queda lista para ser tomada por un bot
                 });
                 
                 await newArticle.save();
-                console.log(`[News Worker] 💾 Guardada en DB: ${newArticle.titulo}`);
+                console.log(`[News Worker] 💾 Guardada en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
                 // 5. INTENTO INMEDIATO DE VIDEO
                 // Intentamos enviarla a un bot ya mismo

@@ -40,6 +40,7 @@ const ArticleSchema = new mongoose.Schema({
     youtubeId: { type: String, default: null },
     videoUrl: { type: String, default: null }, // Nuevo: URL del video en Cloudflare
     audioUrl: { type: String, default: null }, // Nuevo: URL del audio en Cloudflare
+    aiSummary: { type: String, default: null }, // ¡AQUÍ GUARDAMOS EL RESUMEN ADELANTADO!
     escenasJSON: { type: Object, default: null },
 
     fuente: String,
