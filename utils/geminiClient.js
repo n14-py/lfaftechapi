@@ -178,50 +178,57 @@ Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
         const fullText = await generateContentWithRetry(prompt);
         
         // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
+ // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
         let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS ---
-        // Buscamos de ABAJO hacia ARRIBA para saltarnos todo el monólogo inicial de Gemma 4
-        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO VIRAL:'));
+        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS (VERSIÓN BLINDADA) ---
+        // 1. Buscamos el inicio REAL de la estructura, buscando variables comunes que la IA usa
+        let inicioIndex = lines.findIndex(l => /^(L[íi]nea 1|Line 1|\- Line 1|Categor[íi]a):?/i.test(l.trim()));
         
-        if (tituloIndex > 0) {
-            // Tijera: Nos quedamos solo con lo que importa. El índice - 1 es la Categoría.
-            lines = lines.slice(tituloIndex - 2); 
+        // Si no encuentra la Línea 1 explícita, probamos con la 2 o la 3
+        if (inicioIndex === -1) {
+            const paisIndex = lines.findIndex(l => /^(L[íi]nea 2|Line 2|\- Line 2|PAÍS|Country):?/i.test(l.trim()));
+            if (paisIndex > 0) inicioIndex = paisIndex - 1;
         }
-        // ----------------------------------------------
+        if (inicioIndex === -1) {
+            const titIndex = lines.findIndex(l => /^(L[íi]nea 3|Line 3|\- Line 3|TÍTULO VIRAL|Title):?/i.test(l.trim()));
+            if (titIndex >= 2) inicioIndex = titIndex - 2;
+        }
+
+        // Recortamos la basura de arriba
+        if (inicioIndex >= 0) {
+            lines = lines.slice(inicioIndex); 
+        }
 
         // Si después de limpiar quedó vacío o incompleto, aplicamos el salvavidas
         if (lines.length < 4) {
              console.warn("⚠️ [Gemini] Formato incorrecto o texto destruido, usando fallback simple.");
              return { 
                  categoria: "general", 
-                 paisIA: "general",
+                 pais: "general",
                  tituloViral: title, 
-                 textoImagen: title.split(' ').slice(0, 4).join(' '),
-                 articuloGenerado: fullText 
+                 textoImagen: title ? title.split(' ').slice(0, 4).join(' ') : "Noticia",
+                 articuloGenerado: fullText.replace(/.*(Drafting|Strategy|Refining|Line \d:).*\n/gi, '').trim() 
              };
         }
 
-        // 3. Limpieza de Extrema Precisión (Regex)
-        // cleanCategory asumo que ya lo tienes definido arriba en tu código
-// 3. Limpieza de Extrema Precisión (Regex)
-        let categoria = cleanCategory(lines[0]);
+        // 3. Limpieza de Extrema Precisión (Regex para extraer valores exactos)
+        let categoria = cleanCategory(lines[0].replace(/^(\-\s*)?(L[íi]nea 1|Line 1|Categor[íi]a):\s*/i, '').replace(/[\*"]/g, ''));
         
-        // NUEVO: Extraemos el código de país de la Línea 1
         let paisIA = lines[1]
-            .replace(/.*PAÍS:\s*/i, '')
+            .replace(/^(\-\s*)?(L[íi]nea 2|Line 2|PAÍS|Country):\s*/i, '')
             .replace(/[\*"]/g, '')
             .trim().toLowerCase().substring(0, 2);
         
         if (!paisIA) paisIA = 'general';
         
         let tituloViral = lines[2]
-            .replace(/.*TÍTULO VIRAL:\s*/i, '')
+            .replace(/^(\-\s*)?(L[íi]nea 3|Line 3|TÍTULO VIRAL|Title):\s*/i, '')
             .replace(/[\*"]/g, '')
             .trim();
         
         let textoImagen = lines[3]
-            .replace(/.*TEXTO IMAGEN:\s*/i, '')
+            .replace(/^(\-\s*)?(L[íi]nea 4|Line 4|TEXTO IMAGEN|Image):\s*/i, '')
             .replace(/[\*"]/g, '')
             .trim();
         
@@ -229,8 +236,19 @@ Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
-        // El cuerpo ahora empieza desde el índice 4
-        const articuloGenerado = lines.slice(4).join('\n').trim();
+        // 4. LIMPIEZA DEL CUERPO DE LA NOTICIA (Destruye los pensamientos residuales)
+        let articuloLimpio = lines.slice(4).join('\n').trim();
+        
+        // Filtros agresivos para borrar los monólogos en inglés de la IA
+        articuloGenerado = articuloLimpio
+            .replace(/^(\-\s*)?(L[íi]nea 5|Line 5):\s*(Body|Cuerpo).*\n?/i, '') // Quita el "Line 5: Body"
+            .replace(/\*Strategy to reach.*?\*/gi, '') // Quita las estrategias
+            .replace(/\*Drafting the body:\*/gi, '') // Quita el drafting
+            .replace(/\*Refining the text:\*/gi, '') // Quita el refining
+            .replace(/\*Wait,.*?\*/gi, '') // Quita las dudas de la IA
+            .replace(/\(Intro\)/gi, '') // Quita etiquetas de (Intro)
+            .replace(/\(The crisis\)/gi, '') // Quita etiquetas de contexto
+            .trim();
 
         console.log(`✅ [Gemini] Noticia generada OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,30)}..."`);
         
