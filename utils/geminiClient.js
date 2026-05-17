@@ -131,8 +131,9 @@ async function generateContentWithRetry(prompt, retries = 0) {
     }
 }
 
-// ============================================================================
-// 📝 GENERADOR DE ARTÍCULOS LARGOS (PROTEGIDO CONTRA IA REBELDE)
+
+/// ============================================================================
+// 📝 GENERADOR DE ARTÍCULOS LARGOS (BLINDADO - REGLAS ORIGINALES INTACTAS)
 // ============================================================================
 
 exports.generateArticleContent = async (article) => {
@@ -151,7 +152,7 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    // 2. Prompt Blindado (Muro anti-borradores)
+    // 2. Prompt con tus REGLAS ORIGINALES + Delimitadores Anti-Eco
     const prompt = `Actúa como un Periodista Senior. Escribe una noticia basada en:
 ${promptContexto}
 
@@ -163,85 +164,79 @@ ${promptContexto}
 - Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
 - Redacción clara, informativa y coherente
 
---- REGLAS ESTRICTAS DE SALIDA (¡CRÍTICO!) ---
-¡PROHIBIDO PENSAR EN VOZ ALTA! NO generes borradores, "scratchpads", procesos iterativos ("Drafting..."), ni repitas las restricciones ("Constraints:"). TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EL RESULTADO FINAL.
-Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones ni saludos, NO uses Markdown (negritas/cursivas) en los encabezados.
+--- FORMATO DE SALIDA (¡CRÍTICO Y ABSOLUTO!) ---
+¡PROHIBIDO PENSAR EN VOZ ALTA! NO repitas las instrucciones, no generes borradores, ni procesos iterativos. TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EL RESULTADO FINAL.
 
-Línea 1: [Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general]
-Línea 2: PAÍS: [Código ISO de 2 letras del país de la noticia. Ej: py, mx, bo, ar. Si es global pon general]
-Línea 3: TÍTULO VIRAL: [Título llamativo pero basado en hechos reales, sin inventar]
-Línea 4: TEXTO IMAGEN: [Frase de 3 a 5 palabras, visual, SIN preposiciones al final]
-Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
+Tu respuesta final DEBE estar contenida ÚNICAMENTE entre los separadores [===INICIO_DATOS===] y [===FIN_DATOS===].
+
+[===INICIO_DATOS===]
+<categoria>Una categoría: politica, economia, deportes, tecnologia, entretenimiento, salud, internacional, general</categoria>
+<pais>Código ISO de 2 letras del país de la noticia. Ej: py, mx, bo, ar. Si es global pon general</pais>
+<titulo_viral>Título llamativo pero basado en hechos reales, sin inventar</titulo_viral>
+<texto_imagen>Frase de 3 a 5 palabras, visual, SIN preposiciones al final</texto_imagen>
+<cuerpo>
+Cuerpo de la noticia completo, mínimo 600 palabras. Escribe los párrafos normales separados por saltos de línea.
+</cuerpo>
+[===FIN_DATOS===]`;
 
     try {
-        // LLAMADA CON SISTEMA DE ROTACIÓN
+        console.log(`[Gemini] 🧠 Procesando artículo (Escudo Anti-Eco) para: "${title.substring(0,30)}..."`);
+        
         const fullText = await generateContentWithRetry(prompt);
         
-        // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
- // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
-let lines = fullText.split('\n').filter(line => line.trim() !== '');
+        // --- 🛡️ ESCUDO 1: EL TRUCO DEL ÚLTIMO BLOQUE (MATCH ALL) ---
+        const masterRegex = /\[===INICIO_DATOS===\]([\s\S]*?)\[===FIN_DATOS===\]/gi;
+        const matches = [...fullText.matchAll(masterRegex)];
+        
+        let bloqueLimpio = "";
+        
+        if (matches.length > 0) {
+            // Nos quedamos SIEMPRE con el ÚLTIMO bloque que generó la IA.
+            bloqueLimpio = matches[matches.length - 1][1]; 
+        } else {
+            console.warn("⚠️ [Gemini XML] La IA no usó los delimitadores. Usando texto bruto.");
+            bloqueLimpio = fullText;
+        }
 
-        // --- ESCUDO DEFINITIVO: BÚSQUEDA INVERSA CON REGEX ---
-        let tituloIndex = -1;
-        for (let i = lines.length - 1; i >= 0; i--) {
-            if (/(T[ÍI]TULO VIRAL):/i.test(lines[i])) {
-                tituloIndex = i;
-                break;
+        // --- 🛡️ ESCUDO 2: EXTRACTOR DE ETIQUETAS INTERNAS ---
+        const extractTag = (text, tag) => {
+            const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+            const match = text.match(regex);
+            if (match && match[1]) {
+                return match[1].trim().replace(/^\*+|\*+$/g, '').replace(/\*+/g, '');
             }
-        }
+            return null;
+        };
 
-        if (tituloIndex === -1) {
-            for (let i = lines.length - 1; i >= 0; i--) {
-                if (/(TEXTO IMAGEN):/i.test(lines[i])) {
-                    tituloIndex = i - 1;
-                    break;
-                }
-            }
-        }
+        // Extracción de datos
+        let categoria = cleanCategory(extractTag(bloqueLimpio, 'categoria') || 'general');
+        
+        let paisIA = (extractTag(bloqueLimpio, 'pais') || 'general').trim().toLowerCase().substring(0, 2);
+        if (!paisIA || paisIA.length < 2) paisIA = 'general';
 
-        if (tituloIndex >= 2) {
-            lines = lines.slice(tituloIndex - 2);
-        } else if (tituloIndex === 1) {
-            lines = lines.slice(tituloIndex - 1);
-        }
+        let tituloViral = extractTag(bloqueLimpio, 'titulo_viral') || title; 
 
-        if (lines.length < 4) {
-             console.warn("⚠️ [Gemini] Formato destruido, usando fallback.");
-             return { 
-                 categoria: "general", 
-                 pais: "general", 
-                 tituloViral: title, 
-                 textoImagen: title ? title.split(' ').slice(0, 4).join(' ') : "Noticia",
-                 articuloGenerado: fullText.replace(/.*(Drafting|Strategy|Refining|Line \d:).*\n/gi, '').trim() 
-             };
-        }
-
-        let categoria = cleanCategory(lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, ''));
-        
-        let paisIA = lines[1]
-            .replace(/^.*(L[íi]nea 2|PAÍS|Country):?\s*/i, '')
-            .replace(/[\*"]/g, '').trim().toLowerCase().substring(0, 2);
-        if (!paisIA) paisIA = 'general';
-        
-        let tituloViral = lines[2]
-            .replace(/^.*(L[íi]nea 3|T[ÍI]TULO VIRAL|Title):?\s*/i, '')
-            .replace(/[\*"]/g, '').trim();
-        
-        let textoImagen = lines[3]
-            .replace(/^.*(L[íi]nea 4|TEXTO IMAGEN|Image):?\s*/i, '')
-            .replace(/[\*"]/g, '').trim();
-        
-        if (textoImagen.length > 60 || textoImagen.length < 4) {
+        let textoImagen = extractTag(bloqueLimpio, 'texto_imagen');
+        if (!textoImagen || textoImagen.length < 3 || textoImagen.length > 55) {
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
-        let articuloLimpio = lines.slice(4).join('\n').trim();
-        const articuloGenerado = articuloLimpio
-            .replace(/^.*(L[íi]nea 5|Body|Cuerpo).*\n?/i, '')
-            .replace(/\*.*?\*/g, '') 
-            .trim();
+        let articuloGenerado = extractTag(bloqueLimpio, 'cuerpo');
 
-        console.log(`✅ [Gemini] Noticia generada OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,30)}..."`);
+        // --- SALVAVIDAS EXTREMO ---
+        if (!articuloGenerado) {
+            console.warn("🚨 [Gemini XML] ALARMA CRÍTICA: Falló extracción de cuerpo. Limpieza bruta.");
+            articuloGenerado = bloqueLimpio
+                .replace(/<[^>]*>?/gm, '') 
+                .replace(/\[===INICIO_DATOS===\]|\[===FIN_DATOS===\]/gi, '')
+                .trim();
+            
+            if (articuloGenerado.length < 100) {
+                throw new Error("Generación fallida o demasiado corta.");
+            }
+        }
+
+        console.log(`✅ [Gemini] Noticia OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,40)}..."`);
         
         return {
             categoriaSugerida: categoria, 
@@ -253,12 +248,10 @@ let lines = fullText.split('\n').filter(line => line.trim() !== '');
         };
 
     } catch (error) {
-        console.error(`❌ [Gemini] Error Crítico Final:`, error.message);
-        return null;
+        console.error(`❌ [Gemini] Error en generateArticleContent:`, error.message);
+        return null; 
     }
 };
-
-
 
 
 
@@ -302,7 +295,7 @@ exports.generateImagePrompt = async (title, content) => {
 
 
 // ============================================================================
-// 📱 NUEVA IA EXCLUSIVA PARA SHORTS (RESPETANDO CATEGORÍAS ORIGINALES)
+// 📱 NUEVA IA EXCLUSIVA PARA SHORTS (BLINDADA - REGLAS ORIGINALES INTACTAS)
 // ============================================================================
 exports.generateShortArticleContent = async (article) => {
     const { url, title, description } = article; 
@@ -319,8 +312,7 @@ exports.generateShortArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    const prompt = `
-Actúa como un Periodista Senior. Escribe una noticia basada en:
+    const prompt = `Actúa como un Periodista Senior. Escribe un guion para un video corto (Short) basado en:
 ${promptContexto}
 
 --- REGLAS ESTRICTAS DE CONTENIDO ---
@@ -331,78 +323,92 @@ ${promptContexto}
 - Evitar exageraciones innecesarias (no usar "histórico", "sin precedentes", "hito" salvo que esté en la fuente)
 - Redacción clara, informativa y coherente
 
---- REGLAS ESTRICTAS DE SALIDA (¡CRÍTICO!) ---
-¡PROHIBIDO PENSAR EN VOZ ALTA! NO generes borradores, "scratchpads", ni resúmenes en inglés ("Source Content:"). TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EN ESPAÑOL CON EL RESULTADO FINAL.
-Debes responder EXACTAMENTE con este formato de 4 líneas. NO pongas introducciones, NO uses Markdown (negritas/cursivas) en los encabezados.
+--- FORMATO DE SALIDA (¡CRÍTICO Y ABSOLUTO!) ---
+¡PROHIBIDO PENSAR EN VOZ ALTA! NO repitas las instrucciones, no generes borradores, ni resúmenes en inglés. TU RESPUESTA DEBE SER ÚNICA Y EXCLUSIVAMENTE EN ESPAÑOL CON EL RESULTADO FINAL.
 
-Línea 1: [Categoría real de la noticia. Ej: Política, Economía, Tecnología, Deportes, etc.]
+Tu respuesta final DEBE estar contenida ÚNICAMENTE entre los separadores [===INICIO_DATOS===] y [===FIN_DATOS===].
 
-Línea 2: TÍTULO PROFESIONAL: [Título serio, informativo y conciso para la noticia]
-
-Línea 3: TEXTO IMAGEN: [Frase visual de 3 a 5 palabras, SIN preposiciones al final]
-
-Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a 350 palabras. Empieza con un gancho y termina con "Suscríbete a Noticias lat para más noticias."]
-`;
+[===INICIO_DATOS===]
+<categoria>Categoría real de la noticia. Ej: Política, Economía, Tecnología, Deportes, etc.</categoria>
+<titulo_profesional>Título serio, informativo y conciso para la noticia</titulo_profesional>
+<texto_imagen>Frase visual de 3 a 5 palabras, SIN preposiciones al final</texto_imagen>
+<guion>
+Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a 350 palabras. Empieza con un gancho y termina EXACTAMENTE con: "Suscríbete a Noticias lat para más noticias."
+</guion>
+[===FIN_DATOS===]`;
 
     try {
-        const fullText = await generateContentWithRetry(prompt);
- let lines = fullText.split('\n').filter(line => line.trim() !== '');
-
-        // --- ESCUDO INVERSO PARA SHORTS ---
-        let tituloIndex = -1;
-        for (let i = lines.length - 1; i >= 0; i--) {
-            if (/(T[ÍI]TULO PROFESIONAL):/i.test(lines[i])) {
-                tituloIndex = i;
-                break;
-            }
-        }
-
-        if (tituloIndex === -1) {
-            for (let i = lines.length - 1; i >= 0; i--) {
-                if (/(TEXTO IMAGEN):/i.test(lines[i])) {
-                    tituloIndex = i - 1;
-                    break;
-                }
-            }
-        }
-
-        if (tituloIndex >= 1) {
-            lines = lines.slice(tituloIndex - 1); 
-        }
-
-        if (lines.length < 4) {
-             console.warn("⚠️ [Gemini Shorts] Formato destruido, ignorando.");
-             return null;
-        }
-
-        let categoria = lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, '').trim();
+        console.log(`[Gemini Shorts] 🧠 Procesando guion (Escudo Anti-Eco) para: "${title.substring(0,30)}..."`);
         
-        let tituloProfesional = lines[1]
-            .replace(/^.*(L[íi]nea 2|T[ÍI]TULO PROFESIONAL|Title):?\s*/i, '')
-            .replace(/[\*"]/g, '').trim();
-            
-        let textoImagen = lines[2]
-            .replace(/^.*(L[íi]nea 3|TEXTO IMAGEN|Image):?\s*/i, '')
-            .replace(/[\*"]/g, '').trim();
+        const fullText = await generateContentWithRetry(prompt);
+        
+        // --- 🛡️ ESCUDO 1: EL TRUCO DEL ÚLTIMO BLOQUE (MATCH ALL) ---
+        const masterRegex = /\[===INICIO_DATOS===\]([\s\S]*?)\[===FIN_DATOS===\]/gi;
+        const matches = [...fullText.matchAll(masterRegex)];
+        
+        let bloqueLimpio = "";
+        
+        if (matches.length > 0) {
+            // Nos quedamos SIEMPRE con el ÚLTIMO bloque que generó la IA.
+            bloqueLimpio = matches[matches.length - 1][1]; 
+        } else {
+            console.warn("⚠️ [Gemini Shorts] La IA no usó los delimitadores. Usando texto bruto.");
+            bloqueLimpio = fullText;
+        }
 
-        let articuloLimpio = lines.slice(3).join('\n').trim();
-        const articuloGenerado = articuloLimpio
-            .replace(/^.*(L[íi]nea 4|Body|Cuerpo|Guion).*\n?/i, '')
-            .replace(/\*.*?\*/g, '') 
-            .trim();
+        // --- 🛡️ ESCUDO 2: EXTRACTOR DE ETIQUETAS INTERNAS ---
+        const extractTag = (text, tag) => {
+            const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+            const match = text.match(regex);
+            if (match && match[1]) {
+                return match[1].trim().replace(/^\*+|\*+$/g, '').replace(/\*+/g, '');
+            }
+            return null;
+        };
+
+        // Extracción de datos
+        let categoria = extractTag(bloqueLimpio, 'categoria') || 'Shorts';
+        let tituloProfesional = extractTag(bloqueLimpio, 'titulo_profesional') || title; 
+
+        let textoImagen = extractTag(bloqueLimpio, 'texto_imagen');
+        if (!textoImagen || textoImagen.length < 3 || textoImagen.length > 55) {
+             textoImagen = tituloProfesional.split(' ').slice(0, 4).join(' ');
+        }
+
+        let articuloGenerado = extractTag(bloqueLimpio, 'guion');
+
+        // --- SALVAVIDAS EXTREMO ---
+        if (!articuloGenerado) {
+            console.warn("🚨 [Gemini Shorts] ALARMA CRÍTICA: Falló extracción de guion. Limpieza bruta.");
+            articuloGenerado = bloqueLimpio
+                .replace(/<[^>]*>?/gm, '') // Borra etiquetas rotas
+                .replace(/\[===INICIO_DATOS===\]|\[===FIN_DATOS===\]/gi, '')
+                .trim();
+            
+            if (articuloGenerado.length < 50) {
+                 console.warn("⚠️ [Gemini Shorts] Guion demasiado corto o nulo. Abortando.");
+                 return null;
+            }
+        }
+
+        console.log(`✅ [Gemini Shorts] Guion OK: "${tituloProfesional.substring(0,40)}..."`);
         
         return {
-            categoria: categoria,
-            tituloViral: tituloProfesional,
-            textoImagen: textoImagen,
+            categoria: categoria.replace(/[\*"]/g, ''),
+            tituloViral: tituloProfesional.replace(/[\*"]/g, ''),
+            textoImagen: textoImagen.replace(/[\*"]/g, ''),
             articuloGenerado: articuloGenerado
         };
 
     } catch (error) {
-        console.error(`[Gemini Shorts] Error Final:`, error.message);
+        console.error(`❌ [Gemini Shorts] Error Final:`, error.message);
         return null;
     }
 };
+
+
+
+
 // ============================================================================
 // CREADOR DE ESCENAS PARA VIDEOS HORIZONTALES LARGOS (DIRECTOR DE TV ESTRICTO)
 // ============================================================================
