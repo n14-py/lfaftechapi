@@ -151,7 +151,7 @@ exports.generateArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
-    // 2. Prompt Blindado (Muro anti-borradores)
+    // 2. Prompt Blindado (Muro anti-borradores) - ¡INTACTO!
     const prompt = `Actúa como un Periodista Senior. Escribe una noticia basada en:
 ${promptContexto}
 
@@ -178,33 +178,36 @@ Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
         const fullText = await generateContentWithRetry(prompt);
         
         // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
- // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
-let lines = fullText.split('\n').filter(line => line.trim() !== '');
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO DEFINITIVO: BÚSQUEDA INVERSA CON REGEX ---
-        let tituloIndex = -1;
+        // --- ESCUDO DEFINITIVO: BÚSQUEDA INVERSA ANCLADA AL "PAÍS" ---
+        let inicioIndex = -1;
+
+        // 1. Buscamos "PAÍS:" de ABAJO hacia ARRIBA. Esta es el ancla más resistente que existe.
         for (let i = lines.length - 1; i >= 0; i--) {
-            if (/(T[ÍI]TULO VIRAL):/i.test(lines[i])) {
-                tituloIndex = i;
+            // Busca la palabra PAÍS seguida de las 2 letras (ej: "PAÍS: ar" o "PAIS: mx")
+            if (/PA[ÍI]S:\s*[a-zA-Z]{2}/i.test(lines[i])) {
+                inicioIndex = i - 1; // La categoría siempre está exactamente una línea arriba del país
                 break;
             }
         }
 
-        if (tituloIndex === -1) {
+        // 2. Si por algún milagro no puso el país, usamos los respaldos anteriores
+        if (inicioIndex === -1) {
             for (let i = lines.length - 1; i >= 0; i--) {
-                if (/(TEXTO IMAGEN):/i.test(lines[i])) {
-                    tituloIndex = i - 1;
+                if (/(T[ÍI]TULO VIRAL):/i.test(lines[i])) {
+                    inicioIndex = i - 2;
                     break;
                 }
             }
         }
 
-        if (tituloIndex >= 2) {
-            lines = lines.slice(tituloIndex - 2);
-        } else if (tituloIndex === 1) {
-            lines = lines.slice(tituloIndex - 1);
+        // Si encontró el inicio, corta toda la basura (monólogos en inglés) de arriba
+        if (inicioIndex >= 0) {
+            lines = lines.slice(inicioIndex);
         }
 
+        // Salvavidas de seguridad
         if (lines.length < 4) {
              console.warn("⚠️ [Gemini] Formato destruido, usando fallback.");
              return { 
@@ -216,10 +219,11 @@ let lines = fullText.split('\n').filter(line => line.trim() !== '');
              };
         }
 
+        // 3. Extracción Inteligente (Funciona aunque la IA olvide poner los prefijos "Línea X:")
         let categoria = cleanCategory(lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, ''));
         
         let paisIA = lines[1]
-            .replace(/^.*(L[íi]nea 2|PAÍS|Country):?\s*/i, '')
+            .replace(/^.*(L[íi]nea 2|PA[ÍI]S|Country):?\s*/i, '')
             .replace(/[\*"]/g, '').trim().toLowerCase().substring(0, 2);
         if (!paisIA) paisIA = 'general';
         
@@ -235,10 +239,11 @@ let lines = fullText.split('\n').filter(line => line.trim() !== '');
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
+        // 4. Limpieza del cuerpo del texto
         let articuloLimpio = lines.slice(4).join('\n').trim();
         const articuloGenerado = articuloLimpio
             .replace(/^.*(L[íi]nea 5|Body|Cuerpo).*\n?/i, '')
-            .replace(/\*.*?\*/g, '') 
+            .replace(/\*.*?\*/g, '') // Borra pensamientos extraños que queden entre asteriscos
             .trim();
 
         console.log(`✅ [Gemini] Noticia generada OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,30)}..."`);
@@ -319,6 +324,7 @@ exports.generateShortArticleContent = async (article) => {
         promptContexto = `FUENTE LIMITADA: Título: "${title}". Descripción: "${description}".`;
     }
 
+    // EL PROMPT QUEDA INTACTO PARA NO ARRUINAR TUS TIEMPOS NI LA CALIDAD
     const prompt = `
 Actúa como un Periodista Senior. Escribe una noticia basada en:
 ${promptContexto}
@@ -346,36 +352,45 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
 
     try {
         const fullText = await generateContentWithRetry(prompt);
- let lines = fullText.split('\n').filter(line => line.trim() !== '');
+        let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO INVERSO PARA SHORTS ---
-        let tituloIndex = -1;
+        // --- ESCUDO DEFINITIVO: BÚSQUEDA INVERSA ---
+        let inicioIndex = -1;
+
+        // 1. Buscamos de ABAJO hacia ARRIBA el TÍTULO PROFESIONAL
         for (let i = lines.length - 1; i >= 0; i--) {
+            // Busca la etiqueta de título sin importar cómo la escriba la IA
             if (/(T[ÍI]TULO PROFESIONAL):/i.test(lines[i])) {
-                tituloIndex = i;
+                inicioIndex = i - 1; // La categoría siempre está una línea arriba
                 break;
             }
         }
 
-        if (tituloIndex === -1) {
+        // 2. Respaldo: Buscar TEXTO IMAGEN de abajo hacia arriba por si falla lo anterior
+        if (inicioIndex === -1) {
             for (let i = lines.length - 1; i >= 0; i--) {
                 if (/(TEXTO IMAGEN):/i.test(lines[i])) {
-                    tituloIndex = i - 1;
+                    inicioIndex = i - 2; // La categoría está dos líneas arriba
                     break;
                 }
             }
         }
 
-        if (tituloIndex >= 1) {
-            lines = lines.slice(tituloIndex - 1); 
+        // Si encontró el ancla, corta toda la basura (pensamientos) que esté arriba
+        if (inicioIndex >= 0) {
+            lines = lines.slice(inicioIndex); 
         }
 
+        // Salvavidas
         if (lines.length < 4) {
              console.warn("⚠️ [Gemini Shorts] Formato destruido, ignorando.");
              return null;
         }
 
-        let categoria = lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, '').trim();
+        // 3. Extracción Inteligente (Limpia prefijos rebeldes como "Línea 2:")
+        let categoria = lines[0]
+            .replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim();
         
         let tituloProfesional = lines[1]
             .replace(/^.*(L[íi]nea 2|T[ÍI]TULO PROFESIONAL|Title):?\s*/i, '')
@@ -385,12 +400,15 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
             .replace(/^.*(L[íi]nea 3|TEXTO IMAGEN|Image):?\s*/i, '')
             .replace(/[\*"]/g, '').trim();
 
+        // 4. Limpieza del cuerpo del guion
         let articuloLimpio = lines.slice(3).join('\n').trim();
         const articuloGenerado = articuloLimpio
             .replace(/^.*(L[íi]nea 4|Body|Cuerpo|Guion).*\n?/i, '')
-            .replace(/\*.*?\*/g, '') 
+            .replace(/\*.*?\*/g, '') // Elimina cualquier pensamiento residual entre asteriscos
             .trim();
         
+        console.log(`✅ [Gemini Shorts] Guion generado OK: "${tituloProfesional.substring(0,30)}..."`);
+
         return {
             categoria: categoria,
             tituloViral: tituloProfesional,
@@ -399,10 +417,24 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
         };
 
     } catch (error) {
-        console.error(`[Gemini Shorts] Error Final:`, error.message);
+        console.error(`❌ [Gemini Shorts] Error Final:`, error.message);
         return null;
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ============================================================================
 // CREADOR DE ESCENAS PARA VIDEOS HORIZONTALES LARGOS (DIRECTOR DE TV ESTRICTO)
 // ============================================================================
