@@ -355,14 +355,20 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
 
     try {
         const fullText = await generateContentWithRetry(prompt);
-        let lines = fullText.split('\n').filter(line => line.trim() !== '');
+ let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS ---
-        // Buscamos de ABAJO hacia ARRIBA para saltarnos todo el monólogo inicial en inglés
-        const tituloIndex = lines.findLastIndex(l => l.toUpperCase().includes('TÍTULO PROFESIONAL:'));
+        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS (VERSIÓN BLINDADA) ---
+        // 1. Buscamos el inicio REAL de la estructura
+        let inicioIndex = lines.findIndex(l => /^(L[íi]nea 1|Line 1|\- Line 1|Categor[íi]a):?/i.test(l.trim()));
         
-        if (tituloIndex > 0) {
-            lines = lines.slice(tituloIndex - 1); 
+        if (inicioIndex === -1) {
+            const titIndex = lines.findIndex(l => /^(L[íi]nea 2|Line 2|\- Line 2|TÍTULO PROFESIONAL|Title):?/i.test(l.trim()));
+            if (titIndex > 0) inicioIndex = titIndex - 1;
+        }
+
+        // Recortamos la basura de arriba
+        if (inicioIndex >= 0) {
+            lines = lines.slice(inicioIndex); 
         }
 
         if (lines.length < 4) {
@@ -370,11 +376,31 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
              return null;
         }
 
-        // ¡AQUÍ ESTÁ LA CORRECCIÓN! Dejamos que la IA decida la categoría
-        let categoria = lines[0].replace(/^(Categoría|Categoria):\s*/i, '').trim();
-        let tituloProfesional = lines[1].replace(/.*TÍTULO PROFESIONAL:\s*/i, '').replace(/[\*"]/g, '').trim();
-        let textoImagen = lines[2].replace(/.*TEXTO IMAGEN:\s*/i, '').replace(/[\*"]/g, '').trim();
-        const articuloGenerado = lines.slice(3).join('\n').trim();
+        // 3. Limpieza de Extrema Precisión (Regex)
+        let categoria = lines[0].replace(/^(\-\s*)?(L[íi]nea 1|Line 1|Categor[íi]a):\s*/i, '').replace(/[\*"]/g, '').trim();
+        
+        let tituloProfesional = lines[1]
+            .replace(/^(\-\s*)?(L[íi]nea 2|Line 2|TÍTULO PROFESIONAL|Title):\s*/i, '')
+            .replace(/[\*"]/g, '')
+            .trim();
+            
+        let textoImagen = lines[2]
+            .replace(/^(\-\s*)?(L[íi]nea 3|Line 3|TEXTO IMAGEN|Image):\s*/i, '')
+            .replace(/[\*"]/g, '')
+            .trim();
+
+        // 4. LIMPIEZA DEL CUERPO DEL GUION
+        let articuloLimpio = lines.slice(3).join('\n').trim();
+        
+        let articuloGenerado = articuloLimpio
+            .replace(/^(\-\s*)?(L[íi]nea 4|Line 4):\s*(Body|Cuerpo|Guion).*\n?/i, '')
+            .replace(/\*Strategy to reach.*?\*/gi, '')
+            .replace(/\*Drafting the body:\*/gi, '')
+            .replace(/\*Refining the text:\*/gi, '')
+            .replace(/\*Wait,.*?\*/gi, '')
+            .replace(/\(Intro\)/gi, '')
+            .replace(/\(The crisis\)/gi, '')
+            .trim();
         
         return {
             categoria: categoria, // La IA manda aquí
