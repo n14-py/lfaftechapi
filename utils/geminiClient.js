@@ -179,85 +179,76 @@ Línea 5: [Cuerpo de la noticia completo, mínimo 600 palabras...]`;
         
         // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
  // Separamos por líneas usando 'let' UNA SOLA VEZ para evitar errores de sintaxis
-        let lines = fullText.split('\n').filter(line => line.trim() !== '');
+let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO DEFINITIVO ANTI-PENSAMIENTOS (VERSIÓN BLINDADA) ---
-        // 1. Buscamos el inicio REAL de la estructura, buscando variables comunes que la IA usa
-        let inicioIndex = lines.findIndex(l => /^(L[íi]nea 1|Line 1|\- Line 1|Categor[íi]a):?/i.test(l.trim()));
-        
-        // Si no encuentra la Línea 1 explícita, probamos con la 2 o la 3
-        if (inicioIndex === -1) {
-            const paisIndex = lines.findIndex(l => /^(L[íi]nea 2|Line 2|\- Line 2|PAÍS|Country):?/i.test(l.trim()));
-            if (paisIndex > 0) inicioIndex = paisIndex - 1;
-        }
-        if (inicioIndex === -1) {
-            const titIndex = lines.findIndex(l => /^(L[íi]nea 3|Line 3|\- Line 3|TÍTULO VIRAL|Title):?/i.test(l.trim()));
-            if (titIndex >= 2) inicioIndex = titIndex - 2;
+        // --- ESCUDO DEFINITIVO: BÚSQUEDA INVERSA CON REGEX ---
+        let tituloIndex = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (/(T[ÍI]TULO VIRAL):/i.test(lines[i])) {
+                tituloIndex = i;
+                break;
+            }
         }
 
-        // Recortamos la basura de arriba
-        if (inicioIndex >= 0) {
-            lines = lines.slice(inicioIndex); 
+        if (tituloIndex === -1) {
+            for (let i = lines.length - 1; i >= 0; i--) {
+                if (/(TEXTO IMAGEN):/i.test(lines[i])) {
+                    tituloIndex = i - 1;
+                    break;
+                }
+            }
         }
 
-        // Si después de limpiar quedó vacío o incompleto, aplicamos el salvavidas
+        if (tituloIndex >= 2) {
+            lines = lines.slice(tituloIndex - 2);
+        } else if (tituloIndex === 1) {
+            lines = lines.slice(tituloIndex - 1);
+        }
+
         if (lines.length < 4) {
-             console.warn("⚠️ [Gemini] Formato incorrecto o texto destruido, usando fallback simple.");
+             console.warn("⚠️ [Gemini] Formato destruido, usando fallback.");
              return { 
                  categoria: "general", 
-                 pais: "general",
+                 pais: "general", 
                  tituloViral: title, 
                  textoImagen: title ? title.split(' ').slice(0, 4).join(' ') : "Noticia",
                  articuloGenerado: fullText.replace(/.*(Drafting|Strategy|Refining|Line \d:).*\n/gi, '').trim() 
              };
         }
 
-        // 3. Limpieza de Extrema Precisión (Regex para extraer valores exactos)
-        let categoria = cleanCategory(lines[0].replace(/^(\-\s*)?(L[íi]nea 1|Line 1|Categor[íi]a):\s*/i, '').replace(/[\*"]/g, ''));
+        let categoria = cleanCategory(lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, ''));
         
         let paisIA = lines[1]
-            .replace(/^(\-\s*)?(L[íi]nea 2|Line 2|PAÍS|Country):\s*/i, '')
-            .replace(/[\*"]/g, '')
-            .trim().toLowerCase().substring(0, 2);
-        
+            .replace(/^.*(L[íi]nea 2|PAÍS|Country):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim().toLowerCase().substring(0, 2);
         if (!paisIA) paisIA = 'general';
         
         let tituloViral = lines[2]
-            .replace(/^(\-\s*)?(L[íi]nea 3|Line 3|TÍTULO VIRAL|Title):\s*/i, '')
-            .replace(/[\*"]/g, '')
-            .trim();
+            .replace(/^.*(L[íi]nea 3|T[ÍI]TULO VIRAL|Title):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim();
         
         let textoImagen = lines[3]
-            .replace(/^(\-\s*)?(L[íi]nea 4|Line 4|TEXTO IMAGEN|Image):\s*/i, '')
-            .replace(/[\*"]/g, '')
-            .trim();
+            .replace(/^.*(L[íi]nea 4|TEXTO IMAGEN|Image):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim();
         
         if (textoImagen.length > 60 || textoImagen.length < 4) {
              textoImagen = tituloViral.split(' ').slice(0, 4).join(' ');
         }
 
-        // 4. LIMPIEZA DEL CUERPO DE LA NOTICIA (Destruye los pensamientos residuales)
         let articuloLimpio = lines.slice(4).join('\n').trim();
-        
-        // Filtros agresivos para borrar los monólogos en inglés de la IA
-        articuloGenerado = articuloLimpio
-            .replace(/^(\-\s*)?(L[íi]nea 5|Line 5):\s*(Body|Cuerpo).*\n?/i, '') // Quita el "Line 5: Body"
-            .replace(/\*Strategy to reach.*?\*/gi, '') // Quita las estrategias
-            .replace(/\*Drafting the body:\*/gi, '') // Quita el drafting
-            .replace(/\*Refining the text:\*/gi, '') // Quita el refining
-            .replace(/\*Wait,.*?\*/gi, '') // Quita las dudas de la IA
-            .replace(/\(Intro\)/gi, '') // Quita etiquetas de (Intro)
-            .replace(/\(The crisis\)/gi, '') // Quita etiquetas de contexto
+        const articuloGenerado = articuloLimpio
+            .replace(/^.*(L[íi]nea 5|Body|Cuerpo).*\n?/i, '')
+            .replace(/\*.*?\*/g, '') 
             .trim();
 
         console.log(`✅ [Gemini] Noticia generada OK: [${paisIA.toUpperCase()}] "${tituloViral.substring(0,30)}..."`);
         
         return {
             categoriaSugerida: categoria, 
-            categoria: categoria, // Se guarda en tu campo 'categoria'
-            pais: paisIA,         // REEMPLAZO: Usamos 'pais' para que caiga directo en tu BD
+            categoria: categoria,
+            pais: paisIA,
             tituloViral: tituloViral,
-            textoImagen: tituloViral.split(' ').slice(0, 4).join(' '), // Salvavidas para el texto de imagen
+            textoImagen: textoImagen,
             articuloGenerado: articuloGenerado
         };
 
@@ -357,53 +348,51 @@ Línea 4: [Cuerpo del guion completo. Redacción periodística. Largo sugerido: 
         const fullText = await generateContentWithRetry(prompt);
  let lines = fullText.split('\n').filter(line => line.trim() !== '');
 
-        // --- ESCUDO ANTI-PENSAMIENTOS PARA SHORTS (VERSIÓN BLINDADA) ---
-        // 1. Buscamos el inicio REAL de la estructura
-        let inicioIndex = lines.findIndex(l => /^(L[íi]nea 1|Line 1|\- Line 1|Categor[íi]a):?/i.test(l.trim()));
-        
-        if (inicioIndex === -1) {
-            const titIndex = lines.findIndex(l => /^(L[íi]nea 2|Line 2|\- Line 2|TÍTULO PROFESIONAL|Title):?/i.test(l.trim()));
-            if (titIndex > 0) inicioIndex = titIndex - 1;
+        // --- ESCUDO INVERSO PARA SHORTS ---
+        let tituloIndex = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (/(T[ÍI]TULO PROFESIONAL):/i.test(lines[i])) {
+                tituloIndex = i;
+                break;
+            }
         }
 
-        // Recortamos la basura de arriba
-        if (inicioIndex >= 0) {
-            lines = lines.slice(inicioIndex); 
+        if (tituloIndex === -1) {
+            for (let i = lines.length - 1; i >= 0; i--) {
+                if (/(TEXTO IMAGEN):/i.test(lines[i])) {
+                    tituloIndex = i - 1;
+                    break;
+                }
+            }
+        }
+
+        if (tituloIndex >= 1) {
+            lines = lines.slice(tituloIndex - 1); 
         }
 
         if (lines.length < 4) {
-             console.warn("⚠️ [Gemini Shorts] Formato incorrecto o texto destruido, ignorando generación.");
+             console.warn("⚠️ [Gemini Shorts] Formato destruido, ignorando.");
              return null;
         }
 
-        // 3. Limpieza de Extrema Precisión (Regex)
-        let categoria = lines[0].replace(/^(\-\s*)?(L[íi]nea 1|Line 1|Categor[íi]a):\s*/i, '').replace(/[\*"]/g, '').trim();
+        let categoria = lines[0].replace(/^.*(L[íi]nea 1|Categor[íi]a):?\s*/i, '').replace(/[\*"]/g, '').trim();
         
         let tituloProfesional = lines[1]
-            .replace(/^(\-\s*)?(L[íi]nea 2|Line 2|TÍTULO PROFESIONAL|Title):\s*/i, '')
-            .replace(/[\*"]/g, '')
-            .trim();
+            .replace(/^.*(L[íi]nea 2|T[ÍI]TULO PROFESIONAL|Title):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim();
             
         let textoImagen = lines[2]
-            .replace(/^(\-\s*)?(L[íi]nea 3|Line 3|TEXTO IMAGEN|Image):\s*/i, '')
-            .replace(/[\*"]/g, '')
-            .trim();
+            .replace(/^.*(L[íi]nea 3|TEXTO IMAGEN|Image):?\s*/i, '')
+            .replace(/[\*"]/g, '').trim();
 
-        // 4. LIMPIEZA DEL CUERPO DEL GUION
         let articuloLimpio = lines.slice(3).join('\n').trim();
-        
-        let articuloGenerado = articuloLimpio
-            .replace(/^(\-\s*)?(L[íi]nea 4|Line 4):\s*(Body|Cuerpo|Guion).*\n?/i, '')
-            .replace(/\*Strategy to reach.*?\*/gi, '')
-            .replace(/\*Drafting the body:\*/gi, '')
-            .replace(/\*Refining the text:\*/gi, '')
-            .replace(/\*Wait,.*?\*/gi, '')
-            .replace(/\(Intro\)/gi, '')
-            .replace(/\(The crisis\)/gi, '')
+        const articuloGenerado = articuloLimpio
+            .replace(/^.*(L[íi]nea 4|Body|Cuerpo|Guion).*\n?/i, '')
+            .replace(/\*.*?\*/g, '') 
             .trim();
         
         return {
-            categoria: categoria, // La IA manda aquí
+            categoria: categoria,
             tituloViral: tituloProfesional,
             textoImagen: textoImagen,
             articuloGenerado: articuloGenerado
