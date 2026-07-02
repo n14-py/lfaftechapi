@@ -9,8 +9,8 @@ const { generateArticleContent, generateVideoScenesJSON, generateSummaryWithGemi
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
 const VIDEO_BOT_URLS = [
-    "http://185.190.140.189:3001",
-    "https://unreeling-playgroup-relation.ngrok-free.dev"
+    "http://185.190.140.189:3001"
+    
 ];
 
 // Clave para comunicar con los bots (si la usan)
