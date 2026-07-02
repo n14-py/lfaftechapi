@@ -5,7 +5,8 @@ const axios = require('axios');
 const Article = require('../models/article');
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
-const { generateShortArticleContent, generateShortVideoScenesJSON } = require('../utils/geminiClient');// ============================================================================
+// Importamos el cliente Gemini Rotativo adaptado para Shorts
+const { generateShortArticleContent, generateShortVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');// ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
@@ -366,6 +367,35 @@ async function _triggerShortBotWithRotation(article) {
 }
 
 // ============================================================================
+// 🎧 MICROSERVICIO: PEDIR AUDIO A PYTHON PARA SHORTS
+// ============================================================================
+async function _triggerAudioBot(article) {
+    if (SHORT_BOT_URLS.length === 0) return;
+    
+    // Usamos el mismo bot rotativo o el primero
+    const targetBotUrl = SHORT_BOT_URLS[0]; 
+    
+    try {
+        const payload = {
+            articleId: article._id,
+            texto: article.articuloGenerado
+        };
+        console.log(`[AudioBot Shorts] 🎙️ Solicitando locución MP3 a ${targetBotUrl}...`);
+        
+        await axios.post(`${targetBotUrl}/api/tasks/audio`, payload, {
+            headers: { 
+                'x-api-key': VIDEO_BOT_KEY,
+                'ngrok-skip-browser-warning': 'true'
+            },
+            timeout: 5000 // Solo esperamos que acepte la tarea (retorna 202)
+        });
+    } catch (e) {
+        console.error(`[AudioBot Shorts] ⚠️ Error enviando solicitud de audio: ${e.message}`);
+    }
+}
+
+
+// ============================================================================
 // 🏭 7. EL WORKER PRINCIPAL DE SHORTS (CONTROL DE FLUJO)
 // ============================================================================
 
@@ -448,6 +478,11 @@ async function _runShortsWorker() {
             });
 
  if (resultadoIA && resultadoIA.articuloGenerado) {
+                
+                // --- NUEVO: GENERAR RESUMEN IA AL INSTANTE ---
+                console.log(`[Shorts Worker] 🤖 Generando resumen instantáneo para: ${resultadoIA.tituloViral || articleToProcess.title}`);
+                const resumenIA = await generateSummaryWithGemini(resultadoIA.articuloGenerado);
+
                 const newArticle = new Article({
                     titulo: resultadoIA.tituloViral || articleToProcess.title, // Título limpio
                     descripcion: articleToProcess.description,
@@ -460,15 +495,16 @@ async function _runShortsWorker() {
                     fecha: new Date(articleToProcess.publishedAt || Date.now()),
                     articuloGenerado: resultadoIA.articuloGenerado, 
                     imageText: resultadoIA.textoImagen, 
+                    aiSummary: resumenIA, // <--- GUARDAMOS EL RESUMEN AQUÍ
                     telegramPosted: false,
                     videoProcessingStatus: 'pending_short'
                 });
                 
                 await newArticle.save();
-                console.log(`[Shorts Worker] 💾 Short Guardado en DB: ${newArticle.titulo}`);
+                console.log(`[Shorts Worker] 💾 Short Guardado en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
-                // 5. INTENTO INMEDIATO DE VIDEO
-// 5. INTENTO INMEDIATO DE VIDEO
+                // 5. INTENTO INMEDIATO DE VIDEO Y AUDIO
+                _triggerAudioBot(newArticle);
                 await _triggerShortBotWithRotation(newArticle);
                 
             } else {
