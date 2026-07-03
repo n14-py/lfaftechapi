@@ -480,8 +480,12 @@ async function _runShortsWorker() {
  if (resultadoIA && resultadoIA.articuloGenerado) {
                 
                 // --- NUEVO: GENERAR RESUMEN IA AL INSTANTE ---
+// --- NUEVO: GENERAR RESUMEN IA AL INSTANTE (CORREGIDO PARA SHORTS) ---
                 console.log(`[Shorts Worker] 🤖 Generando resumen instantáneo para: ${resultadoIA.tituloViral || articleToProcess.title}`);
-                const resumenIA = await generateSummaryWithGemini(resultadoIA.articuloGenerado);
+                
+                // Usamos la noticia original para que la IA no se confunda intentando resumir un guion de video
+                const textoParaResumir = `Título: ${articleToProcess.title}\nDescripción: ${articleToProcess.description}`;
+                const resumenIA = await generateSummaryWithGemini(textoParaResumir);
 
                 const newArticle = new Article({
                     titulo: resultadoIA.tituloViral || articleToProcess.title, // Título limpio
@@ -558,6 +562,10 @@ exports.createManualShortArticle = async (req, res) => {
         
         if (!iaData) return res.status(500).json({ error: "Error IA Texto Shorts: No se pudo generar." });
 
+        // --- NUEVO: Generar el resumen con IA para que aparezca en la web ---
+        console.log(`[Manual Shorts] 🤖 Generando resumen instantáneo...`);
+        const resumenIA = await generateSummaryWithGemini(iaData.articuloGenerado);
+
         const newArticle = new Article({
             titulo: "[Short] " + iaData.tituloViral, 
             descripcion: 'Noticia Manual',
@@ -566,6 +574,7 @@ exports.createManualShortArticle = async (req, res) => {
             // Aseguramos que el enlace manual no choque
             enlaceOriginal: (enlaceOriginal || `manual-${Date.now()}`) + "#short",
             articuloGenerado: iaData.articuloGenerado,
+            aiSummary: resumenIA, // <--- GUARDAMOS EL RESUMEN AQUÍ PARA LA WEB
             categoria: 'Shorts',
             pais: 'general',
             telegramPosted: false,
@@ -573,6 +582,9 @@ exports.createManualShortArticle = async (req, res) => {
         });
 
         await newArticle.save();
+        
+        // --- NUEVO: Llamar al bot de audio además del de video ---
+        _triggerAudioBot(newArticle);
         _triggerShortBotWithRotation(newArticle);
         
         res.status(201).json(newArticle);

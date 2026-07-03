@@ -333,7 +333,7 @@ Tu respuesta final DEBE estar contenida ÚNICAMENTE entre los separadores [===IN
 <titulo_profesional>Título serio, informativo y conciso para la noticia</titulo_profesional>
 <texto_imagen>Frase visual de 3 a 5 palabras, SIN preposiciones al final</texto_imagen>
 <guion>
-Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a 350 palabras. Empieza con un gancho y termina EXACTAMENTE con: "Suscríbete a Noticias lat para más noticias."
+Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a 350 palabras. Empieza con un gancho y termina EXACTAMENTE con: "Siguenos en Noticias lat para más noticias."
 </guion>
 [===FIN_DATOS===]`;
 
@@ -438,15 +438,16 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
     - "bgm_mood": "urgencia", "analisis", "tension".
     - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia".
 
-    FORMATO JSON EXACTO QUE DEBES REPLICAR (Imita esta estructura y la longitud de los textos largos):
+    FORMATO JSON EXACTO QUE DEBES REPLICAR (Imita esta estructura de alternancia y respeta la longitud de textos cortos):
     {
-      "youtube_title": "Título llamativo para YouTube",
+      "youtube_title": "Título llamativo para Shorts #shorts",
       "youtube_description": "Descripción optimizada...",
-      "youtube_tags": ["tag1", "tag2"],
+      "youtube_tags": ["tag1", "tag2", "shorts"],
       "scenes": [
         {
           "type": "intro",
           "text": "¡El turismo rompe todos los récords históricos durante este último feriado nacional!",
+          "layout_category": "sin_presentador",
           "voice": "hombre_1",
           "bgm_mood": "urgencia",
           "sfx_type": "impactos"
@@ -454,21 +455,22 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
         {
           "type": "body",
           "image_url": "${imagenPrincipal}",
-          "layout_category": "hombre",
-          "text": "Las cifras oficiales emitidas por las autoridades confirman un aumento masivo de viajeros en todo el país durante este fin de semana largo. La reactivación económica se ha sentido con fuerza en múltiples sectores, demostrando la enorme capacidad de recuperación que tiene la industria turística local frente a los recientes desafíos.",
-          "voice": "hombre_1",
+          "layout_category": "mujer",
+          "text": "Las cifras oficiales emitidas por las autoridades confirman un aumento masivo de viajeros en todo el país durante este fin de semana largo.",
+          "voice": "mujer_1",
           "bgm_mood": "analisis",
           "sfx_type": "transiciones"
         },
         {
           "type": "pexels",
           "termino_busqueda": "tourists beach sunny",
-          "layout_category": "sin_presentador",
-          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando todas las expectativas económicas trazadas por los gremios. Restaurantes, comercios locales y empresas de transporte reportaron ingresos que no se veían desde hace varios años, inyectando vitalidad a las comunidades receptoras.",
-          "voice": "mujer_1",
+          "layout_category": "hombre",
+          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando todas las expectativas económicas trazadas por los gremios.",
+          "voice": "hombre_1",
           "bgm_mood": "tension",
           "sfx_type": "alertas"
         }
+        // ... CONTINÚA ALTERNANDO HASTA LLEGAR A LAS 9 o 10 ESCENAS EXACTAS ...
       ]
     }`;
 
