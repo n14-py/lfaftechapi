@@ -10,7 +10,7 @@ const { generateShortArticleContent, generateShortVideoScenesJSON, generateSumma
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
-    "http://18.220.191.209:3001" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
+    "http://3.133.55.254:3001" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
 ];
 
 // Clave para comunicar con los bots (si la usan)
