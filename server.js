@@ -30,6 +30,7 @@ global.includeIntros = true; // Por defecto las intros están activadas al reini
 // MIDDLEWARES
 // =============================================
 const whiteList = [
+    'https://api.noticias.lat',
     'https://lfaftechapi.onrender.com',
     'http://18.218.177.159:5000',
     'https://lfaftechapi-7nrb.onrender.com',
