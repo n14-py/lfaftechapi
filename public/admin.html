@@ -3,426 +3,697 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin LFAF Tech - Radio Relax</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <title>⚡ noticias.lat | Centro de Control IA</title>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        :root { --primary: #e91e63; --bg: #f4f4f9; --text: #333; --green: #4CAF50; --blue: #2196F3; --red: #f44336; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        
-        /* --- Estilos Generales de UI --- */
-        button { background: var(--primary); color: white; border: none; cursor: pointer; font-weight: 600; padding: 10px 15px; border-radius: 6px; font-size: 0.95rem; transition: all 0.2s; }
-        button:hover { opacity: 0.85; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        input[type="text"], input[type="search"] { padding: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 1rem; width: 100%; box-sizing: border-box; }
-        .btn-green { background: var(--green); }
-        .btn-blue { background: var(--blue); }
-        .btn-red { background: var(--red); }
-        .btn-grey { background: #6c757d; }
-        .btn-small { padding: 5px 10px; font-size: 0.85rem; }
+        :root {
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --bg-input: #334155;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --accent: #ec4899;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+        }
 
-        /* --- Pestañas de Navegación --- */
-        .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 25px; }
-        .tab-button { padding: 15px 25px; cursor: pointer; background: none; border: none; font-size: 1.1rem; font-weight: 600; color: #aaa; position: relative; }
-        .tab-button.active { color: var(--primary); }
-        .tab-button.active::after { content: ''; position: absolute; bottom: -2px; left: 0; right: 0; height: 3px; background: var(--primary); }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- CONTENEDOR DE AUTENTICACIÓN --- */
+        #login-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.95);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: all 0.3s ease;
+        }
+
+        .login-box {
+            background: var(--bg-card);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+        }
+
+        .login-box h2 {
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+            color: var(--text-main);
+        }
+
+        .login-box p {
+            color: var(--text-muted);
+            margin-bottom: 25px;
+            font-size: 0.9rem;
+        }
+
+        /* --- NAVBAR SUPERIOR --- */
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-area h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-area span {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .badge-live {
+            background: rgba(236, 72, 153, 0.15);
+            color: var(--accent);
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            text-transform: uppercase;
+        }
+
+        .user-actions {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* --- MAQUETACIÓN PRINCIPAL --- */
+        .container {
+            max-width: 1300px;
+            width: 100%;
+            margin: 25px auto;
+            padding: 0 20px;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 25px;
+        }
+
+        @media (min-width: 992px) {
+            .container {
+                grid-template-columns: 2fr 1fr;
+            }
+            .full-width-grid {
+                grid-column: 1 / -1;
+            }
+        }
+
+        /* --- TARJETAS / COMPONENTES --- */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-main);
+        }
+
+        /* --- COMPONENTES FORMULARIOS --- */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"], input[type="password"], select, textarea {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+
+        /* --- BOTONES PREMIUM --- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: #0f172a; font-weight: 600; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-secondary { background: #475569; color: white; }
+        .btn-secondary:hover { background: #334155; }
+
+        /* --- INTERRUPTOR MÁGICO DE INTROS --- */
+        .intro-control-box {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .intro-info h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
+        .intro-info p { font-size: 0.85rem; color: var(--text-muted); }
+
+        .switch-btn {
+            padding: 14px 28px;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            min-width: 190px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .switch-on {
+            background: var(--success);
+            color: white;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+        }
+
+        .switch-off {
+            background: var(--danger);
+            color: white;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+        }
+
+        /* --- GRILLA DE ACCIONES RÁPIDAS --- */
+        .actions-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        @media (min-width: 576px) {
+            .actions-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        /* --- PESTAÑAS (TABS) PARA FORMULARIOS MANUALES --- */
+        .tabs-header {
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        .tab-link {
+            padding: 10px 16px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.95rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .tab-link.active {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        /* --- Pestaña 1: Carga Masiva --- */
-        #drop-zone { border: 3px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: all 0.3s; }
-        #drop-zone.dragover { background: #ffeef4; border-color: var(--primary); transform: scale(1.02); }
-        #upload-queue-container { margin-top: 20px; max-height: 300px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; }
-        .queue-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid #eee; }
-        .queue-item span { font-size: 0.9rem; }
-        .queue-status { font-weight: 700; font-size: 0.9rem; }
-        .status-pending { color: #aaa; }
-        .status-uploading { color: var(--blue); }
-        .status-done { color: var(--green); }
-        .status-error { color: var(--red); }
+        /* --- CONSOLA DE REGISTROS LIVE --- */
+        .console {
+            background: #020617;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #38bdf8;
+            height: 180px;
+            overflow-y: auto;
+            border: 1px solid #1e293b;
+        }
 
-        /* --- Pestaña 2: Gestor de Playlist --- */
-        .playlist-controls { display: grid; grid-template-columns: 1fr auto; gap: 15px; margin-bottom: 20px; }
-        .playlist-item { display: flex; align-items: center; padding: 12px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px; }
-        .handle { cursor: move; padding: 0 10px; font-size: 1.5rem; color: #999; }
-        .item-checkbox { margin-right: 10px; }
-        .info { flex-grow: 1; }
-        .meta { font-size: 0.85rem; color: #666; }
-        .actions { display: flex; gap: 8px; }
-        #pagination { margin-top: 20px; display: flex; justify-content: center; align-items: center; gap: 10px; }
+        .console-entry {
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+        .console-success { color: #4ade80; }
+        .console-error { color: #f87171; }
+        .console-warn { color: #fbbf24; }
 
-        /* --- Pestaña 3: Publicación --- */
-        .publish-bar { background: #333; color: white; padding: 20px 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
-        #publish-btn { font-size: 1.2rem; padding: 15px 25px; }
-        #txt-viewer { background: #2d2d2d; color: #f1f1f1; border-radius: 8px; padding: 15px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 20px; display: none; }
-        #publish-log { background: #f1f1f1; border-radius: 8px; padding: 15px; max-height: 200px; overflow-y: auto; font-size: 0.9rem; }
+        /* --- MONITOREO DE COLA / MONGO TABLE --- */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
 
-        #loading { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(255,255,255,0.85); display: none; justify-content: center; align-items: center; font-size: 2rem; z-index: 999; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: #1e293b;
+            padding: 12px 16px;
+            font-weight: 600;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            background: #111827;
+        }
+
+        tr:last-child td { border-bottom: none; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .status-processing { background: rgba(37, 99, 235, 0.15); color: var(--primary); }
+        .status-complete { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .status-failed { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+        .status-policy { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; }
+
+        .tg-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .tg-ok { color: var(--success); }
+        .tg-no { color: var(--text-muted); }
     </style>
 </head>
 <body>
 
-    <div id="loading">⏳ Procesando...</div>
-
-    <div class="container">
-        <header style="text-align: center; margin-bottom: 20px;">
-            <h1>🎛️ Panel de Control - Radio Relax</h1>
-        </header>
-
-        <nav class="tabs">
-            <button class="tab-button active" onclick="showTab('tab-upload')">📤 Subir Música</button>
-            <button class="tab-button" onclick="showTab('tab-manage')">📋 Gestor de Playlist</button>
-            <button class="tab-button" onclick="showTab('tab-publish')">📡 Publicación</button>
-        </nav>
-
-        <div id="tab-upload" class="tab-content active">
-            <div class="card">
-                <h2>Carga Masiva (Uno por Uno)</h2>
-                <div id="drop-zone">
-                    <h3>Arrastra tus 300+ archivos MP3 aquí</h3>
-                    <p>o haz click para seleccionar</p>
-                    <input type="file" id="fileInput" accept="audio/*" multiple style="display: none;">
-                </div>
-                <div id="upload-queue-container">
-                    <div id="upload-queue"></div>
-                </div>
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2>⚡ Centro de Mando</h2>
+            <p>Introduce la API Admin Key configurada en tu servidor.</p>
+            <div class="form-group">
+                <input type="password" id="admin-key-input" placeholder="Contraseña Maestra..." onkeydown="if(event.key === 'Enter') login()">
             </div>
-        </div>
-
-        <div id="tab-manage" class="tab-content">
-            <div class="card">
-                <div class="playlist-controls">
-                    <input type="search" id="searchInput" placeholder="Buscar canciones por título...">
-                    <button id="deleteSelectedBtn" class="btn-red">🗑️ Borrar Seleccionados</button>
-                </div>
-                <div id="playlist-container">Cargando...</div>
-                <div id="pagination"></div>
-            </div>
-        </div>
-
-        <div id="tab-publish" class="tab-content">
-            <div class="card">
-                <div class="publish-bar">
-                    <span>Publica tus cambios para que salgan al aire.</span>
-                    <button id="publish-btn" class="btn-green">🚀 PUBLICAR CAMBIOS EN VIVO</button>
-                </div>
-            </div>
-            <div class="card">
-                <h2>Ver "Borrador" del TXT</h2>
-                <p>Así es como se verá el `playlist.txt` que tu transmisor descargará cuando publiques.</p>
-                <button id="viewTxtBtn" class="btn-blue">Ver TXT (Borrador)</button>
-                <pre id="txt-viewer"></pre>
-            </div>
-             <div class="card">
-                <h2>Historial de Publicaciones (Log)</h2>
-                <div id="publish-log" style="font-family: monospace;"></div>
-            </div>
+            <button class="btn btn-primary" onclick="login()">Desbloquear Panel</button>
         </div>
     </div>
 
+    <header>
+        <div class="logo-area">
+            <h1>noticias.<span>lat</span></h1>
+            <div class="badge-live">IA Central Red</div>
+        </div>
+        <div class="user-actions">
+            <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="logout()">🔒 Cerrar Sesión</button>
+        </div>
+    </header>
+
+    <div class="container">
+        
+        <div style="display: flex; flex-direction: column; gap: 25px;">
+            
+            <div class="intro-control-box full-width-grid">
+                <div class="intro-info">
+                    <h3>Freno de Retención de Audiencia</h3>
+                    <p>Filtra y elimina la escena "intro" en tiempo real para saltar directo a la noticia.</p>
+                </div>
+                <div>
+                    <button id="switch-intros" class="switch-btn switch-on" onclick="toggleIntros()">CARGANDO...</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">🤖 Motores de Sincronización (APIs Externas)</div>
+                <div class="actions-grid">
+                    <div>
+                        <h4 style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px;">📺 Noticiero Largo Horizontal</h4>
+                        <button class="btn btn-primary" onclick="triggerAction('/api/sync-news', 'Sincronización de Noticias Largas detonada')">🔄 Forzar Sincronización</button>
+                        <button class="btn btn-secondary" style="margin-top: 8px;" onclick="triggerAction('/api/retry-videos', 'Resurrección de videos zombies ejecutada')">🧟 Desatascar Videos Zombies</button>
+                    </div>
+                    <div>
+                        <h4 style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px;">📱 Shorts Verticales (YouTube/FB)</h4>
+                        <button class="btn btn-warning" onclick="triggerAction('/api/sync-shorts', 'Sincronización de Shorts detonada')">⚡ Buscar Noticias Shorts</button>
+                        <button class="btn btn-secondary" style="margin-top: 8px;" onclick="triggerAction('/api/retry-shorts', 'Resurrección de shorts zombies ejecutada')">🧟 Desatascar Shorts Zombies</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="tabs-header">
+                    <div id="tab-long-link" class="tab-link active" onclick="switchFormTab('long')">📰 Inyectar Video Horizontal</div>
+                    <div id="tab-short-link" class="tab-link" onclick="switchFormTab('short')">🎬 Inyectar Short Vertical</div>
+                </div>
+
+                <div id="form-long" class="tab-content active">
+                    <div class="form-group">
+                        <label>Título Inicial (Gemini lo convertirá en viral)</label>
+                        <input type="text" id="long-title" placeholder="Ej: Histórica tormenta azota la región...">
+                    </div>
+                    <div class="form-group">
+                        <label>URL Fuente de la Noticia (Para Scraping y Extracción)</label>
+                        <input type="text" id="long-url" placeholder="https://elpais.com/noticia-ejemplo">
+                    </div>
+                    <div class="form-group">
+                        <label>URL de Imagen Miniatura (Opcional, Placeholder automático si se deja vacío)</label>
+                        <input type="text" id="long-img" placeholder="https://imagenes.com/foto.jpg">
+                    </div>
+                    <button class="btn btn-success" onclick="createManualContent('long')">🧠 Expandir Noticia y Generar Escenas JSON</button>
+                </div>
+
+                <div id="form-short" class="tab-content">
+                    <div class="form-group">
+                        <label>Título para Short (Formato vertical e impacto rápido)</label>
+                        <input type="text" id="short-title" placeholder="Ej: ¡Este dato romperá internet hoy!">
+                    </div>
+                    <div class="form-group">
+                        <label>URL Fuente para Guion Corto</label>
+                        <input type="text" id="short-url" placeholder="https://infobae.com/noticia-short">
+                    </div>
+                    <div class="form-group">
+                        <label>URL de Imagen B-Roll Inicial</label>
+                        <input type="text" id="short-img" placeholder="https://imagenes.com/foto-short.jpg">
+                    </div>
+                    <button class="btn btn-warning" onclick="createManualContent('short')">📱 Redactar Guion Short de 85 Segundos</button>
+                </div>
+            </div>
+
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 25px;">
+            
+            <div class="card">
+                <div class="card-title">🖥️ Log del Sistema Operativo</div>
+                <div id="syslog" class="console">
+                    <div class="console-entry">[INFO] Consola noticias.lat lista y esperando comandos...</div>
+                </div>
+                <button class="btn btn-secondary" style="margin-top: 10px; padding: 6px; font-size: 0.8rem;" onclick="clearLog()">Clear Log</button>
+            </div>
+
+            <div class="card" style="background: linear-gradient(135deg, #1e293b, #111827);">
+                <div class="card-title" style="margin-bottom: 8px;">📊 Reglas de Blindaje Inteligente</div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;">
+                    • **Límite de Buffer:** Máximo 15 noticias en espera. Si se llena, la IA detiene el gasto de API de Gemini automáticamente.<br>
+                    • **Freno de Cuota:** Si YouTube reporta cuota agotada, el sistema entra en modo de hibernación segura de 5 minutos de forma autónoma.
+                </p>
+            </div>
+
+        </div>
+
+        <div class="full-width-grid card">
+            <div class="card-title" style="justify-content: space-between;">
+                <span>📦 Monitor de Base de Datos en Tiempo Real (Últimos 10 artículos)</span>
+                <button class="btn btn-primary" style="width: auto; padding: 6px 14px; font-size: 0.8rem;" onclick="fetchLiveArticles()">🔄 Refrescar Cola</button>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Título de la Noticia</th>
+                            <th>Categoría</th>
+                            <th>País</th>
+                            <th>Estado del Video</th>
+                            <th>Telegram</th>
+                            <th>Recursos Guardados</th>
+                        </tr>
+                    </thead>
+                    <tbody id="articles-table-body">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted);">Cargando registros de MongoDB Atlas...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
     <script>
-        // --- ============================================= ---
-        // --- CONFIGURACIÓN GLOBAL Y AUTENTICACIÓN          ---
-        // --- ============================================= ---
-        const API_KEY = localStorage.getItem('admin_key') || prompt("🔑 Ingresa tu CLAVE DE ADMINISTRADOR:");
-        if (API_KEY) localStorage.setItem('admin_key', API_KEY);
+        let authHeaders = {};
 
-        const API_BASE = '/api/relax'; 
-        const loading = document.getElementById('loading');
-        const authHeaders = { 'x-api-key': API_KEY };
-
-        const uploadQueue = []; // Aquí viven los archivos "En espera"
-        let isUploading = false; // Bloqueo para subir de a uno
-
-        // --- ============================================= ---
-        // --- LÓGICA DE PESTAÑAS                          ---
-        // --- ============================================= ---
-        function showTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            document.querySelector(`.tab-button[onclick="showTab('${tabId}')"]`).classList.add('active');
-            
-            // Cargar la playlist solo cuando se hace clic en la pestaña "Gestionar"
-            if (tabId === 'tab-manage') {
-                loadPlaylist(1); // Cargar página 1
+        // Verificación de sesión al arrancar
+        window.onload = function() {
+            const savedKey = localStorage.getItem('lfaf_admin_key');
+            if (savedKey) {
+                authHeaders = { 'x-api-key': savedKey };
+                document.getElementById('login-overlay').style.display = 'none';
+                initDashboard();
             }
         }
 
-        // --- ============================================= ---
-        // --- PESTAÑA 1: LÓGICA DE CARGA MASIVA             ---
-        // --- ============================================= ---
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('fileInput');
-        const queueContainer = document.getElementById('upload-queue');
-
-        dropZone.onclick = () => fileInput.click();
-        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
-        dropZone.ondragleave = () => dropZone.classList.remove('dragover');
-        fileInput.onchange = () => handleFiles(fileInput.files);
-        dropZone.ondrop = (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
-        };
-
-        function handleFiles(files) {
-            for (const file of files) {
-                if (file.type.startsWith('audio/')) {
-                    const queueId = `q-${Date.now()}-${Math.random()}`;
-                    uploadQueue.push({ file: file, id: queueId }); // Añadir a la cola
-                    
-                    // Añadir a la UI
-                    const itemEl = document.createElement('div');
-                    itemEl.className = 'queue-item';
-                    itemEl.id = queueId;
-                    itemEl.innerHTML = `
-                        <span>${file.name}</span>
-                        <span class="queue-status status-pending">En espera...</span>
-                    `;
-                    queueContainer.appendChild(itemEl);
-                }
-            }
-            processQueue(); // Iniciar el procesamiento de la cola
+        function login() {
+            const key = document.getElementById('admin-key-input').value;
+            if(!key) return alert("Debes colocar una contraseña.");
+            authHeaders = { 'x-api-key': key };
+            localStorage.setItem('lfaf_admin_key', key);
+            document.getElementById('login-overlay').style.display = 'none';
+            logConsole("Sesión iniciada con éxito.", "success");
+            initDashboard();
         }
 
-        async function processQueue() {
-            if (isUploading || uploadQueue.length === 0) {
-                return; // Si ya hay algo subiendo, o no hay nada en la cola, esperar.
-            }
-            
-            isUploading = true;
-            const job = uploadQueue.shift(); // Tomar el primer item de la cola
-            const itemEl = document.getElementById(job.id);
-            const statusEl = itemEl.querySelector('.queue-status');
-            
-            try {
-                statusEl.textContent = 'Subiendo...';
-                statusEl.className = 'queue-status status-uploading';
-
-                const formData = new FormData();
-                formData.append('audio', job.file);
-                // (El título y tipo se quedan por defecto, puedes añadir inputs si quieres)
-
-                await axios.post(`${API_BASE}/upload`, formData, {
-                    headers: { 'x-api-key': API_KEY, 'Content-Type': 'multipart/form-data' }
-                });
-
-                statusEl.textContent = '¡Completado!';
-                statusEl.className = 'queue-status status-done';
-            
-            } catch (error) {
-                statusEl.textContent = 'Error';
-                statusEl.className = 'queue-status status-error';
-                handleError(`Error subiendo ${job.file.name}`, error, false); // No mostrar alerta, solo log
-            }
-            
-            isUploading = false;
-            processQueue(); // Llamar al siguiente en la cola
+        function logout() {
+            localStorage.removeItem('lfaf_admin_key');
+            location.reload();
         }
 
-        // --- ============================================= ---
-        // --- PESTAÑA 2: LÓGICA DEL GESTOR DE PLAYLIST      ---
-        // --- ============================================= ---
-        const searchInput = document.getElementById('searchInput');
-        const playlistContainer = document.getElementById('playlist-container');
-        const paginationContainer = document.getElementById('pagination');
-        let sortableInstance = null;
-
-        // Cargar lista (con paginación y búsqueda)
-        async function loadPlaylist(page = 1, query = '') {
-            loading.style.display = 'flex';
-            try {
-                const res = await axios.get(`${API_BASE}/playlist`, {
-                    headers: authHeaders,
-                    params: { pagina: page, query: query }
-                });
-                renderPlaylist(res.data);
-            } catch (error) {
-                handleError("Error cargando la playlist", error);
-            }
-            loading.style.display = 'none';
+        function initDashboard() {
+            checkIntrosStatus();
+            fetchLiveArticles();
+            // Polling suave de actualización cada 40 segundos para ver cambios en los videos
+            setInterval(fetchLiveArticles, 40000);
         }
 
-        // Renderizar la lista y los botones de paginación
-        function renderPlaylist(data) {
-            playlistContainer.innerHTML = ''; // Limpiar lista
-            
-            // Renderizar items
-            data.items.forEach(item => {
-                const div = document.createElement('div');
-                div.className = `playlist-item ${item.type}`;
-                div.dataset.uuid = item.uuid;
-                div.innerHTML = `
-                    <input type="checkbox" class="item-checkbox" data-uuid="${item.uuid}">
-                    <div class="handle">☰</div>
-                    <div class="info">
-                        <strong>${item.title}</strong>
-                        <div class="meta">
-                            ${item.type.toUpperCase()} | ⏱️ ${Math.round(item.duration)}s | 📅 ${new Date(item.createdAt).toLocaleDateString()}
-                        </div>
-                    </div>
-                    <div class="actions">
-                        <a href="${item.audioUrl}" target="_blank" class="btn-small btn-blue" style="text-decoration: none;">▶️ Escuchar</a>
-                        <button class="btn-small btn-red" onclick="deleteTrack('${item.uuid}')">🗑️ Borrar</button>
-                    </div>
-                `;
-                playlistContainer.appendChild(div);
-            });
-
-            // Renderizar paginación
-            paginationContainer.innerHTML = '';
-            if (data.totalPages > 1) {
-                // Botón "Anterior"
-                const prevBtn = document.createElement('button');
-                prevBtn.textContent = '<< Anterior';
-                prevBtn.disabled = data.currentPage === 1;
-                prevBtn.onclick = () => loadPlaylist(data.currentPage - 1, searchInput.value);
-                paginationContainer.appendChild(prevBtn);
-
-                // Texto "Página X de Y"
-                const pageInfo = document.createElement('span');
-                pageInfo.textContent = `Página ${data.currentPage} de ${data.totalPages}`;
-                paginationContainer.appendChild(pageInfo);
-
-                // Botón "Siguiente"
-                const nextBtn = document.createElement('button');
-                nextBtn.textContent = 'Siguiente >>';
-                nextBtn.disabled = data.currentPage === data.totalPages;
-                nextBtn.onclick = () => loadPlaylist(data.currentPage + 1, searchInput.value);
-                paginationContainer.appendChild(nextBtn);
-            }
-            
-            // (Re)iniciar el Drag & Drop
-            if (sortableInstance) sortableInstance.destroy();
-            sortableInstance = new Sortable(playlistContainer, {
-                handle: '.handle',
-                animation: 150,
-                onEnd: onDragEnd
-            });
-        }
-        
-        // Búsqueda (con "debounce" para no hacer 1000 llamadas)
-        let searchTimeout;
-        searchInput.onkeyup = () => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                loadPlaylist(1, searchInput.value);
-            }, 500); // Espera 500ms después de que el usuario deja de teclear
-        };
-        
-        // Guardar orden al arrastrar
-        async function onDragEnd() {
-            const newOrderItems = [];
-            document.querySelectorAll('#playlist-container .playlist-item').forEach((el, index) => {
-                newOrderItems.push({ uuid: el.dataset.uuid, order: index + 1 });
-            });
-
-            loading.style.display = 'flex';
-            try {
-                // NOTA: Esto solo guarda el orden de la página actual.
-                // Para guardar el orden de 300+ canciones, necesitaríamos una lógica más compleja
-                // Por ahora, solo funciona bien si no estás buscando (sort by 'order').
-                await axios.post(`${API_BASE}/reorder`, { items: newOrderItems }, { headers: authHeaders });
-            } catch (error) {
-                handleError("Error guardando el orden", error);
-            }
-            loading.style.display = 'none';
-        }
-
-        // Borrar una sola canción
-        async function deleteTrack(uuid) {
-            if (!confirm("¿Seguro que quieres eliminar este audio?")) return;
-            loading.style.display = 'flex';
-            try {
-                await axios.delete(`${API_BASE}/track/${uuid}`, { headers: authHeaders });
-                loadPlaylist(1, searchInput.value); // Recargar
-            } catch (error) {
-                handleError("Error al eliminar", error);
-            }
-            loading.style.display = 'none';
-        }
-
-        // Borrado Múltiple
-        document.getElementById('deleteSelectedBtn').onclick = async () => {
-            const selectedUuids = [];
-            document.querySelectorAll('.item-checkbox:checked').forEach(el => {
-                selectedUuids.push(el.dataset.uuid);
-            });
-
-            if (selectedUuids.length === 0) return alert("No has seleccionado ninguna canción.");
-            if (!confirm(`¿Seguro que quieres eliminar ${selectedUuids.length} canciones?`)) return;
-
-            loading.style.display = 'flex';
-            try {
-                await axios.delete(`${API_BASE}/tracks`, { 
-                    headers: authHeaders,
-                    data: { uuids: selectedUuids } // axios 'delete' envía 'data'
-                });
-                loadPlaylist(1, searchInput.value); // Recargar
-            } catch (error) {
-                handleError("Error en borrado múltiple", error);
-            }
-            loading.style.display = 'none';
-        };
-
-        // --- ============================================= ---
-        // --- PESTAÑA 3: LÓGICA DE PUBLICACIÓN              ---
-        // --- ============================================= ---
-        const publishLog = document.getElementById('publish-log');
-
-        function logToPanel(message, isError = false) {
+        // --- CONSOLA LOG UTILS ---
+        function logConsole(message, type = "info") {
+            const log = document.getElementById('syslog');
+            const entry = document.createElement('div');
+            entry.className = `console-entry console-${type}`;
             const time = new Date().toLocaleTimeString();
-            const color = isError ? 'var(--red)' : 'var(--green)';
-            publishLog.innerHTML = `<div style="color: ${color};">[${time}] ${message}</div>` + publishLog.innerHTML;
+            entry.textContent = `[${time}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
         }
 
-        // Botón "Publicar"
-        document.getElementById('publish-btn').onclick = async () => {
-            if (!confirm("¿Estás seguro?\nEsto reiniciará el stream en vivo (1-2s de silencio) para aplicar todos tus cambios.")) return;
+        function clearLog() {
+            document.getElementById('syslog').innerHTML = '<div class="console-entry">[INFO] Consola reseteada de forma limpia.</div>';
+        }
+
+        // --- MANEJO DE INTROS ---
+        async function checkIntrosStatus() {
+            try {
+                // Pasamos la key por query param para compatibilidad nativa con el middleware del server
+                const savedKey = localStorage.getItem('lfaf_admin_key');
+                const res = await axios.get(`/api/admin/status?key=${savedKey}`, { headers: authHeaders });
+                updateIntroUI(res.data.introsActivas);
+            } catch (err) {
+                logConsole("Error leyendo estado de intros en el backend.", "error");
+            }
+        }
+
+        function updateIntroUI(active) {
+            const btn = document.getElementById('switch-intros');
+            if (active) {
+                btn.textContent = "✅ INTROS ACTIVADAS";
+                btn.className = "switch-btn switch-on";
+            } else {
+                btn.textContent = "🚫 INTROS DESACTIVADAS";
+                btn.className = "switch-btn switch-off";
+            }
+        }
+
+        async function toggleIntros() {
+            const btn = document.getElementById('switch-intros');
+            btn.textContent = "⏳ PROCESANDO...";
+            try {
+                const savedKey = localStorage.getItem('lfaf_admin_key');
+                const res = await axios.post(`/api/admin/toggle-intros?key=${savedKey}`, {}, { headers: authHeaders });
+                updateIntroUI(res.data.introsActivas);
+                logConsole(`Las intros globales del sistema se cambiaron a: ${res.data.introsActivas ? 'ACTIVADAS' : 'DESACTIVADAS'}`, "warn");
+            } catch (err) {
+                logConsole("Error al conmutar las intros.", "error");
+                checkIntrosStatus();
+            }
+        }
+
+        // --- DISPARADOR DE ACCIONES GENÉRICAS (WORKERS) ---
+        async function triggerAction(endpoint, successMsg) {
+            logConsole(`Ejecutando orden en: ${endpoint}...`, "info");
+            try {
+                const savedKey = localStorage.getItem('lfaf_admin_key');
+                const res = await axios.post(`${endpoint}?key=${savedKey}`, {}, { headers: authHeaders });
+                logConsole(`${successMsg}: ${res.data.message || 'Ok'}`, "success");
+            } catch (err) {
+                logConsole(`Fallo crítico al ejecutar comando en ${endpoint}`, "error");
+            }
+        }
+
+        // --- PESTAÑAS DEL GENERADOR MANUAL ---
+        function switchFormTab(type) {
+            document.getElementById('tab-long-link').classList.toggle('active', type === 'long');
+            document.getElementById('tab-short-link').classList.toggle('active', type === 'short');
+            document.getElementById('form-long').classList.toggle('active', type === 'long');
+            document.getElementById('form-short').classList.toggle('active', type === 'short');
+        }
+
+        // --- CREACIÓN MANUAL DE CONTENIDO (POST FORMULARIOS) ---
+        async function createManualContent(type) {
+            const prefix = type === 'long' ? 'long' : 'short';
+            const titulo = document.getElementById(`${prefix}-title`).value;
+            const enlaceOriginal = document.getElementById(`${prefix}-url`).value;
+            const imagen = document.getElementById(`${prefix}-img`).value;
+
+            if(!enlaceOriginal) return alert("La URL fuente es estrictamente obligatoria.");
+
+            logConsole(`Enviando comando de inyección manual (${type.toUpperCase()}) a Gemini...`, "info");
             
-            loading.style.display = 'flex';
+            // Si es short, apuntamos a la ruta de shorts, si es long a la estándar
+            const endpoint = type === 'long' ? '/api/articles' : '/api/articles-shorts-manual-placeholder'; 
+            
             try {
-                const res = await axios.post(`${API_BASE}/publish`, {}, { headers: authHeaders });
-                alert(`✅ ¡Éxito! ${res.data.message}`);
-                logToPanel(res.data.message);
-            } catch (error) {
-                handleError("Error al Publicar", error);
-                logToPanel(error.response?.data?.error || error.message, true);
-            }
-            loading.style.display = 'none';
-        };
+                const savedKey = localStorage.getItem('lfaf_admin_key');
+                const res = await axios.post(`${endpoint}?key=${savedKey}`, {
+                    titulo, enlaceOriginal, imagen
+                }, { headers: authHeaders });
 
-        // Botón "Ver TXT (Borrador)"
-        const txtViewer = document.getElementById('txt-viewer');
-        document.getElementById('viewTxtBtn').onclick = async () => {
-            loading.style.display = 'flex';
-            try {
-                const res = await axios.get(`${API_BASE}/playlist.txt`, { headers: authHeaders });
-                txtViewer.textContent = res.data;
-                txtViewer.style.display = 'block';
-            } catch (error) {
-                handleError("Error al cargar el TXT", error);
+                logConsole(`✅ Contenido creado con éxito en DB: ${res.data.titulo}`, "success");
+                
+                // Limpiar inputs
+                document.getElementById(`${prefix}-title`).value = "";
+                document.getElementById(`${prefix}-url`).value = "";
+                document.getElementById(`${prefix}-img`).value = "";
+                
+                fetchLiveArticles();
+            } catch (err) {
+                logConsole(`Fallo de inyección IA: ${err.response?.data?.error || err.message}`, "error");
             }
-            loading.style.display = 'none';
-        };
-
-        // --- ============================================= ---
-        // --- INICIO Y HELPERS                            ---
-        // --- ============================================= ---
-        
-        // Helper de Errores
-        function handleError(message, error, showAlert = true) {
-            console.error(message, error);
-            const errorMsg = error.response?.data?.error || error.message;
-            if (showAlert) alert(`❌ ${message}: ${errorMsg}`);
         }
 
-        // Iniciar
-        showTab('tab-upload'); // Empezar en la pestaña de subida
+        // --- OBTENER REGISTROS DESDE MONGODB ---
+        async function fetchLiveArticles() {
+            const tbody = document.getElementById('articles-table-body');
+            try {
+                // Buscamos las últimas noticias guardadas para noticias.lat
+                const res = await axios.get('/api/articles?sitio=noticias.lat&limite=10');
+                const articulos = res.data.articulos;
+
+                if (!articulos || articulos.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No hay artículos en la base de datos para este sitio.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = "";
+                articulos.forEach(art => {
+                    // Mapeo estilizado de estados
+                    let statusClass = "status-pending";
+                    let statusText = art.videoProcessingStatus || 'pending';
+                    
+                    if (statusText === 'processing' || statusText === 'processing_short') statusClass = "status-processing";
+                    if (statusText === 'complete') statusClass = "status-complete";
+                    if (statusText === 'failed') statusClass = "status-failed";
+                    if (statusText === 'rejected_policy') statusClass = "status-policy";
+
+                    // Enlaces de recursos guardados
+                    let links = [];
+                    if (art.youtubeId) links.push(`<a href="https://youtube.com/watch?v=${art.youtubeId}" target="_blank" style="color:#60a5fa;text-decoration:none;">📺 YouTube</a>`);
+                    if (art.videoUrl) links.push(`<a href="${art.videoUrl}" target="_blank" style="color:#f472b6;text-decoration:none;">🎥 R2 Video</a>`);
+                    if (art.audioUrl) links.push(`<a href="${art.audioUrl}" target="_blank" style="color:#34d399;text-decoration:none;">🎧 MP3</a>`);
+                    if (art.aiSummary) links.push(`<span title="${art.aiSummary}" style="cursor:help;color:var(--text-muted);">📝 Resumen Ok</span>`);
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td style="font-weight:500; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${art.titulo}</td>
+                            <td style="color: var(--text-muted);">${art.categoria}</td>
+                            <td style="text-transform: uppercase; font-weight:600;">${art.pais || 'global'}</td>
+                            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                            <td><span class="tg-badge ${art.telegramPosted ? 'tg-ok' : 'tg-no'}">${art.telegramPosted ? '✅ ENVIADO' : '⏳ COLA'}</span></td>
+                            <td style="display:flex; gap:10px; flex-wrap:wrap;">${links.length > 0 ? links.join(' | ') : 'Generando...'}</td>
+                        </tr>
+                    `;
+                });
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger);">Error de conexión con la API Madre.</td></tr>`;
+            }
+        }
     </script>
 </body>
 </html>

@@ -326,7 +326,14 @@ async function _triggerShortBotWithRotation(article) {
     // Le inyectamos el ID de la base de datos al JSON para que Python sepa a quién pertenece
     payload_escenas.article_id = articleCheck._id;
 
-    
+        // --- 🛡️ MAGIA DEL PANEL ADMIN: FILTRO DE INTROS (SHORTS) ---
+        if (global.includeIntros === false && payload_escenas.scenes) {
+            // Filtramos la lista de escenas y quitamos la que sea de tipo "intro"
+            payload_escenas.scenes = payload_escenas.scenes.filter(escena => escena.type !== 'intro');
+            console.log(`[ShortsBot] 🚫 Intros desactivadas desde el Admin. Se eliminó la intro de este Short.`);
+        }
+        // -------------------------------------------------------------------
+
     let attempts = 0;
     let sent = false;
 

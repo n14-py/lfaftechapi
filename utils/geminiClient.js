@@ -440,7 +440,7 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
 
     FORMATO JSON EXACTO QUE DEBES REPLICAR (Imita esta estructura de alternancia y respeta la longitud de textos cortos):
     {
-      "youtube_title": "Título llamativo para Shorts #shorts",
+      "youtube_title": "Título llamativo e informativo para la noticia",
       "youtube_description": "Descripción optimizada...",
       "youtube_tags": ["tag1", "tag2", "shorts"],
       "scenes": [
@@ -562,14 +562,40 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
 
     FORMATO JSON EXACTO QUE DEBES REPLICAR:
     {
-      "youtube_title": "Título llamativo para Shorts #shorts",
+      "youtube_title": "Título llamativo para Shorts",
       "youtube_description": "Descripción optimizada...",
       "youtube_tags": ["tag1", "tag2", "shorts"],
       "scenes": [
-         // ... AQUÍ TUS 9 a 10 ESCENAS ...
+        {
+          "type": "intro",
+          "text": "¡El turismo rompe todos los récords históricos durante este último feriado nacional!",
+          "layout_category": "sin_presentador",
+          "voice": "hombre_1",
+          "bgm_mood": "urgencia",
+          "sfx_type": "impactos"
+        },
+        {
+          "type": "body",
+          "image_url": "${imagenPrincipal}",
+          "layout_category": "mujer",
+          "text": "Las cifras oficiales emitidas por las autoridades confirman un aumento masivo de viajeros en todo el país durante este fin de semana largo.",
+          "voice": "mujer_1",
+          "bgm_mood": "analisis",
+          "sfx_type": "transiciones"
+        },
+        {
+          "type": "pexels",
+          "termino_busqueda": "tourists beach sunny",
+          "layout_category": "hombre",
+          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando todas las expectativas económicas trazadas por los gremios.",
+          "voice": "hombre_1",
+          "bgm_mood": "tension",
+          "sfx_type": "alertas"
+        }
+        // ... CONTINÚA ALTERNANDO HASTA LLEGAR A LAS 9 o 10 ESCENAS EXACTAS ...
       ]
     }`;
-
+    
     try {
         console.log(`  [Gemini Shorts Director] Calculando métricas... Creando JSON para Short de 85s...`);
         let jsonText = await generateContentWithRetry(prompt);

@@ -22,6 +22,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // =============================================
+// VARIABLES GLOBALES DEL SISTEMA (ADMIN PANEL)
+// =============================================
+global.includeIntros = true; // Por defecto las intros están activadas al reiniciar
+
+// =============================================
 // MIDDLEWARES
 // =============================================
 const whiteList = [
@@ -87,6 +92,44 @@ mongoose.connect(process.env.MONGODB_URI)
 // RUTAS DE LA API
 // =============================================
 app.use('/api', apiRoutes);
+
+// =============================================
+// ENDPOINTS DEL PANEL DE ADMINISTRACIÓN
+// =============================================
+const requireAdmin = (req, res, next) => {
+    // Soporta la clave enviada por cabecera oculta o por URL (para el panel web)
+    const apiKey = req.headers['x-api-key'] || req.query.key; 
+    if (apiKey && apiKey === process.env.ADMIN_API_KEY) {
+        next();
+    } else {
+        res.status(403).json({ error: "Acceso denegado: Contraseña de Admin incorrecta." });
+    }
+};
+
+// Ver el estado actual del sistema desde el Panel
+app.get('/api/admin/status', requireAdmin, (req, res) => {
+    res.json({
+        introsActivas: global.includeIntros,
+        mensaje: "Sistema operando correctamente"
+    });
+});
+
+// Botón para Activar/Desactivar Intros desde el Panel
+app.post('/api/admin/toggle-intros', requireAdmin, (req, res) => {
+    if (typeof req.body.activado === 'boolean') {
+        global.includeIntros = req.body.activado;
+    } else {
+        // Si solo se aprieta el botón, invierte el estado actual
+        global.includeIntros = !global.includeIntros;
+    }
+    console.log(`🛡️ [ADMIN] Las intros en los videos ahora están: ${global.includeIntros ? 'ACTIVADAS ✅' : 'DESACTIVADAS ❌'}`);
+    res.json({ success: true, introsActivas: global.includeIntros });
+});
+
+// Servir la página visual del Panel HTML (que crearemos al final)
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 
 // Ruta de bienvenida básica
 app.get('/', (req, res) => {

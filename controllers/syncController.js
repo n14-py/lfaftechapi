@@ -336,9 +336,18 @@ async function _triggerVideoBotWithRotation(article) {
     }
 
     // Le inyectamos el ID de la base de datos al JSON para que Python sepa a quién pertenece
-    payload_escenas.article_id = articleCheck._id;
+// Le inyectamos el ID de la base de datos al JSON para que Python sepa a qui n pertenece
+        payload_escenas.article_id = articleCheck._id;
 
-    let attempts = 0;
+        // --- 🛡️ MAGIA DEL PANEL ADMIN: FILTRO DE INTROS (VIDEOS LARGOS) ---
+        if (global.includeIntros === false && payload_escenas.scenes) {
+            // Filtramos la lista de escenas y quitamos la que sea de tipo "intro"
+            payload_escenas.scenes = payload_escenas.scenes.filter(escena => escena.type !== 'intro');
+            console.log(`[VideoBot] 🚫 Intros desactivadas desde el Admin. Se eliminó la intro de este video.`);
+        }
+        // -------------------------------------------------------------------
+
+        let attempts = 0;
     let sent = false;
 
     while (!sent && attempts < 3) {
