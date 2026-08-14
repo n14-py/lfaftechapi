@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AdManager Pro | Noticias.lat</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --sidebar-bg: #0f172a;
+            --sidebar-hover: #1e293b;
+            --sidebar-text: #94a3b8;
+            --sidebar-active: #ffffff;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --primary-light: #eff6ff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --sidebar-width: 280px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.05);
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg-body); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; font-size: 14px; }
+
+        /* --- LOGIN OVERLAY SECURE --- */
+        #login-overlay {
+            position: fixed; inset: 0; z-index: 9999;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            display: flex; justify-content: center; align-items: center; padding: 20px;
+        }
+        .login-box {
+            background: #fff; padding: 50px 40px; border-radius: 24px; width: 100%; max-width: 450px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15); text-align: center; position: relative;
+            overflow: hidden; border: 1px solid rgba(255,255,255,0.5);
+        }
+        .login-box::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 5px; background: var(--primary); }
+        .login-box .brand-icon { font-size: 3rem; color: var(--primary); margin-bottom: 20px; }
+        .login-box h2 { font-size: 2rem; margin-bottom: 5px; color: var(--text-main); font-weight: 800; letter-spacing: -0.5px;}
+        .login-box p { color: var(--text-muted); margin-bottom: 30px; font-size: 0.95rem; }
+
+        /* --- SIDEBAR --- */
+        .sidebar {
+            width: var(--sidebar-width); background: var(--sidebar-bg);
+            display: flex; flex-direction: column; transition: all 0.3s;
+            box-shadow: 4px 0 15px rgba(0,0,0,0.05); z-index: 100;
+        }
+        .sidebar-brand {
+            padding: 30px 25px; border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #fff; font-size: 1.6rem; font-weight: 900; letter-spacing: -0.5px;
+            display: flex; align-items: center; gap: 12px;
+        }
+        .sidebar-brand i { color: var(--primary); }
+        
+        .nav-section { padding: 20px 25px 10px; font-size: 0.75rem; font-weight: 800; color: var(--sidebar-text); text-transform: uppercase; letter-spacing: 1px; }
+        .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px;}
+        .nav-item {
+            padding: 12px 25px; color: var(--sidebar-text); text-decoration: none;
+            display: flex; align-items: center; gap: 15px; cursor: pointer;
+            font-weight: 500; transition: all 0.2s; border-right: 4px solid transparent;
+        }
+        .nav-item i { width: 20px; text-align: center; font-size: 1.1rem; }
+        .nav-item:hover { background: var(--sidebar-hover); color: #fff; }
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(37,99,235,0.15) 0%, transparent 100%); 
+            color: var(--primary); border-right-color: var(--primary); font-weight: 600;
+        }
+        .nav-item.active i { color: var(--primary); }
+        .sidebar-footer { padding: 20px; border-top: 1px solid rgba(255,255,255,0.05); }
+
+        /* --- MAIN CONTENT --- */
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        
+        /* Topbar */
+        .topbar {
+            background: var(--bg-surface); height: 75px; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center; padding: 0 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.02); z-index: 50;
+        }
+        .badge-pro { background: var(--primary-light); color: var(--primary); padding: 6px 15px; border-radius: 50px; font-size: 0.75rem; font-weight: 800; border: 1px solid rgba(37,99,235,0.2); letter-spacing: 0.5px;}
+        .user-info { display: flex; align-items: center; gap: 15px; font-weight: 600; color: var(--text-main); }
+        .avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), #8b5cf6); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 700; box-shadow: 0 4px 10px rgba(37,99,235,0.3);}
+
+        /* Scroll Area */
+        .content-area { flex: 1; overflow-y: auto; padding: 40px; scroll-behavior: smooth; }
+        .section-view { display: none; animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .section-view.active { display: block; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* --- DASHBOARD CARDS --- */
+        .page-header { margin-bottom: 35px; }
+        .page-header h2 { font-size: 2rem; color: var(--text-main); font-weight: 800; letter-spacing: -0.5px;}
+        .page-header p { color: var(--text-muted); margin-top: 8px; font-size: 1.05rem;}
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 25px; margin-bottom: 40px; }
+        .stat-card {
+            background: var(--bg-surface); padding: 30px; border-radius: 20px;
+            border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+            display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+        .stat-icon { position: absolute; top: 30px; right: 30px; font-size: 2rem; color: var(--primary-light); opacity: 0.8;}
+        .stat-title { font-size: 0.85rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-size: 2.8rem; font-weight: 900; color: var(--text-main); letter-spacing: -1px;}
+
+        /* --- CARDS & FORMS --- */
+        .panel-card {
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: 20px; padding: 35px; margin-bottom: 30px;
+            box-shadow: var(--shadow-sm);
+        }
+        .panel-card h3 { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); color: var(--text-main); font-size: 1.3rem; font-weight: 800; display: flex; align-items: center; gap: 10px;}
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+
+        .form-group { margin-bottom: 25px; }
+        .form-group label { display: block; font-size: 0.9rem; color: var(--text-main); margin-bottom: 10px; font-weight: 700; }
+        .form-group p.hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; line-height: 1.4;}
+        
+        input, select, textarea {
+            width: 100%; background: #f8fafc; border: 1px solid var(--border);
+            border-radius: 12px; padding: 16px; color: var(--text-main); font-size: 1rem; transition: all 0.2s;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); background: #fff; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1); }
+
+        /* OMNICHANNEL CHECKBOXES */
+        .omni-box {
+            display: flex; gap: 15px; padding: 20px; background: #f8fafc; 
+            border: 1px solid var(--border); border-radius: 12px;
+        }
+        .omni-option { 
+            flex: 1; background: #fff; border: 1px solid var(--border); padding: 15px; border-radius: 10px;
+            display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.2s; font-weight: 600;
+        }
+        .omni-option:hover { border-color: var(--primary); }
+        .omni-option input { width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary); }
+
+        /* --- BOTONES --- */
+        .btn {
+            padding: 16px 28px; border-radius: 12px; font-size: 1rem; font-weight: 700;
+            cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        .btn-full { width: 100%; }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 15px rgba(37,99,235,0.25); }
+        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37,99,235,0.3); }
+        .btn-dark { background: var(--sidebar-bg); color: white; }
+        .btn-dark:hover { background: #000; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+        .btn-outline:hover { background: var(--bg-body); }
+
+        /* --- TABLAS --- */
+        .table-responsive { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+        table { width: 100%; border-collapse: collapse; text-align: left; background: #fff;}
+        th { background: #f8fafc; padding: 18px 20px; color: var(--text-muted); font-size: 0.8rem; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid var(--border); letter-spacing: 0.5px;}
+        td { padding: 18px 20px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 0.95rem;}
+        tr:hover td { background: #f8fafc; }
+        
+        .badge { padding: 6px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; display: inline-block; letter-spacing: 0.5px;}
+        .bg-warning { background: rgba(245,158,11,0.15); color: #d97706; }
+        .bg-success { background: rgba(16,185,129,0.15); color: #059669; }
+        .bg-info { background: rgba(59,130,246,0.15); color: #2563eb; }
+
+        /* --- MANUAL DE USO (ACCORDION) --- */
+        .help-item { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 15px; overflow: hidden; }
+        .help-header { padding: 20px; background: #f8fafc; font-weight: 700; cursor: pointer; display: flex; justify-content: space-between; align-items: center; color: var(--text-main); font-size: 1.05rem;}
+        .help-header:hover { background: #f1f5f9; }
+        .help-body { padding: 20px; background: #fff; border-top: 1px solid var(--border); line-height: 1.6; color: var(--text-muted); font-size: 0.95rem; display: none; }
+        .help-body.active { display: block; }
+
+        /* --- TOASTS --- */
+        #toast-container { position: fixed; bottom: 30px; right: 30px; z-index: 10000; display: flex; flex-direction: column; gap: 15px; }
+        .toast {
+            background: #fff; border-left: 4px solid var(--primary); color: var(--text-main);
+            padding: 20px 25px; border-radius: 12px; box-shadow: 0 15px 30px rgba(0,0,0,0.1);
+            animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; min-width: 320px; border: 1px solid var(--border);
+        }
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* --- MODAL URLS --- */
+        #modal-urls {
+            position: fixed; inset: 0; background: rgba(15,23,42,0.8); z-index: 1000;
+            display: none; justify-content: center; align-items: center; padding: 20px; backdrop-filter: blur(8px);
+        }
+        .modal-content {
+            background: #fff; border-radius: 24px; width: 100%; max-width: 700px;
+            max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        }
+        .modal-header { padding: 25px 35px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 35px; overflow-y: auto; flex: 1; }
+        .url-item { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;}
+        .url-item a { color: var(--primary); font-weight: 700; text-decoration: none; word-break: break-all; }
+        .url-item a:hover { text-decoration: underline; }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-body); }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; height: auto; flex-direction: row; flex-wrap: wrap; }
+            .nav-section { display: none; }
+            .nav-menu { display: flex; overflow-x: auto; padding: 0; }
+            .nav-item { border-right: none; border-bottom: 3px solid transparent; white-space: nowrap; padding: 15px;}
+            .nav-item:hover, .nav-item.active { border-right: none; border-bottom-color: var(--primary); background: transparent;}
+            .sidebar-footer { display: none; }
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .omni-box { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- OVERLAY LOGIN -->
+    <div id="login-overlay">
+        <div class="login-box">
+            <i class="fa-solid fa-chart-pie brand-icon"></i>
+            <h2>AdManager Pro</h2>
+            <p>Plataforma exclusiva para anunciantes y agencias asociadas a Noticias.lat.</p>
+            <div class="form-group">
+                <input type="email" id="login-email" placeholder="Correo electrónico corporativo">
+            </div>
+            <div class="form-group">
+                <input type="password" id="login-password" placeholder="Contraseña de acceso" onkeydown="if(event.key === 'Enter') login()">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="login()">
+                <i class="fa-solid fa-arrow-right-to-bracket"></i> Acceder a mi Panel
+            </button>
+        </div>
+    </div>
+
+    <!-- TOASTS -->
+    <div id="toast-container"></div>
+
+    <!-- SIDEBAR -->
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <i class="fa-solid fa-bolt"></i>
+            <div>AdManager<span>.Pro</span></div>
+        </div>
+        
+        <div class="nav-menu">
+            <div class="nav-section">Análisis</div>
+            <a class="nav-item active" onclick="navigate('dashboard', this)">
+                <i class="fa-solid fa-chart-simple"></i> Dashboard Global
+            </a>
+            <a class="nav-item" onclick="navigate('campaigns', this)">
+                <i class="fa-solid fa-list-check"></i> Mis Campañas
+            </a>
+            
+            <div class="nav-section">Operaciones</div>
+            <a class="nav-item" onclick="navigate('create', this)">
+                <i class="fa-solid fa-bullhorn"></i> Lanzar Anuncio
+            </a>
+            
+            <div class="nav-section">Soporte y Más</div>
+            <a class="nav-item" onclick="navigate('manual', this)">
+                <i class="fa-solid fa-book-open"></i> Manual y Formatos
+            </a>
+            <a class="nav-item" onclick="navigate('billing', this)">
+                <i class="fa-solid fa-file-invoice-dollar"></i> Facturación
+            </a>
+            <a class="nav-item" onclick="navigate('audience', this)">
+                <i class="fa-solid fa-users-viewfinder"></i> Audiencias
+            </a>
+        </div>
+
+        <div class="sidebar-footer">
+            <button class="btn btn-outline btn-full" style="color:var(--sidebar-text); border-color:rgba(255,255,255,0.1)" onclick="logout()">
+                <i class="fa-solid fa-power-off"></i> Cerrar Sesión
+            </button>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-wrapper">
+        <header class="topbar">
+            <div><span class="badge badge-pro"><i class="fa-solid fa-circle-check"></i> CLIENTE VERIFICADO</span></div>
+            <div class="user-info">
+                <span id="header-client-name">Empresa Partner</span>
+                <div class="avatar" id="header-avatar">E</div>
+            </div>
+        </header>
+
+        <div class="content-area">
+            
+            <!-- ==========================================
+                 SECCIÓN 1: DASHBOARD
+            =========================================== -->
+            <section id="dashboard" class="section-view active">
+                <div class="page-header">
+                    <h2>Resumen de Impacto</h2>
+                    <p>Mide el rendimiento de tu inversión publicitaria en tiempo real a través de nuestra red.</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <i class="fa-solid fa-eye stat-icon"></i>
+                        <span class="stat-title">Impresiones / Vistas Totales</span>
+                        <span class="stat-value" id="stat-views">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fa-solid fa-hand-pointer stat-icon"></i>
+                        <span class="stat-title">Clics Generados</span>
+                        <span class="stat-value" id="stat-clicks" style="color: var(--primary);">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fa-solid fa-percent stat-icon"></i>
+                        <span class="stat-title">CTR Promedio</span>
+                        <span class="stat-value" id="stat-ctr" style="color: var(--success);">0%</span>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fa-solid fa-satellite-dish stat-icon"></i>
+                        <span class="stat-title">Campañas en Rotación</span>
+                        <span class="stat-value" id="stat-active">0</span>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3><i class="fa-solid fa-trophy" style="color: var(--warning);"></i> Top 5: Anuncios de Mayor Rendimiento</h3>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Nombre de Campaña</th>
+                                    <th>Formato Principal</th>
+                                    <th>Impresiones</th>
+                                    <th>Clics</th>
+                                    <th>CTR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-ads-body">
+                                <tr><td colspan="5" style="text-align:center; padding: 40px;">Recopilando telemetría...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==========================================
+                 SECCIÓN 2: MIS CAMPAÑAS
+            =========================================== -->
+            <section id="campaigns" class="section-view">
+                <div class="page-header">
+                    <h2>Gestor de Campañas</h2>
+                    <p>Administra todos tus anuncios históricos y verifica dónde han sido inyectados por la IA.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Campaña & Formato</th>
+                                    <th>Estado Actual</th>
+                                    <th>Distribución (Omnicanal)</th>
+                                    <th>Rendimiento (Vis / Clics)</th>
+                                    <th>Comprobantes de Pub.</th>
+                                </tr>
+                            </thead>
+                            <tbody id="all-ads-body">
+                                <tr><td colspan="5" style="text-align:center; padding: 40px;">Cargando historial de campañas...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==========================================
+                 SECCIÓN 3: CREADOR DE ANUNCIOS
+            =========================================== -->
+            <section id="create" class="section-view">
+                <div class="page-header">
+                    <h2>Lanzar Nueva Campaña</h2>
+                    <p>Configura tu anuncio paso a paso. Pasará a moderación rápida antes de entrar a la red global.</p>
+                </div>
+
+                <div class="panel-card">
+                    <h3><i class="fa-solid fa-1"></i> Identificación e Inversión</h3>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>Nombre Interno de la Campaña</label>
+                            <input type="text" id="ad-name" placeholder="Ej: Black Friday 2026 - Zapatillas">
+                        </div>
+                        <div class="form-group">
+                            <label>Límite de Impresiones (Targeting)</label>
+                            <input type="number" id="ad-limit" value="0">
+                            <p class="hint">Deja en 0 si tu contrato es por tiempo ilimitado.</p>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Enlace de Destino (Click-Through URL)</label>
+                        <input type="url" id="ad-link" placeholder="https://www.tu-sitio-web.com/oferta-exclusiva">
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3><i class="fa-solid fa-2"></i> Omnicanalidad (Placement)</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 15px;">Selecciona en qué plataformas de Noticias.lat quieres que aparezca este anuncio.</p>
+                    <div class="omni-box">
+                        <label class="omni-option">
+                            <input type="checkbox" id="chk-video" checked> 
+                            <div><i class="fa-brands fa-youtube" style="color: #ef4444;"></i> Videos (YouTube/R2)</div>
+                        </label>
+                        <label class="omni-option">
+                            <input type="checkbox" id="chk-web" checked> 
+                            <div><i class="fa-solid fa-globe" style="color: var(--primary);"></i> Portal Web</div>
+                        </label>
+                        <label class="omni-option">
+                            <input type="checkbox" id="chk-app"> 
+                            <div><i class="fa-solid fa-mobile-screen" style="color: var(--success);"></i> Aplicación Móvil</div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3><i class="fa-solid fa-3"></i> Formato Visual</h3>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>¿Cómo quieres que se vea tu marca?</label>
+                        <select id="ad-type" onchange="toggleAdFields()">
+                            <option value="mencion_ia">Mención Patrocinada (Nuestro presentador IA hablará de tu marca)</option>
+                            <option value="video_incrustado">Pausa Comercial de TV (Sube tu propio video publicitario completo)</option>
+                            <option value="banner_flotante">Banner Flotante (Tu logo/imagen entra flotando en pantalla)</option>
+                            <option value="banner_web">Solo Display Gráfico (Ignora el video, ideal para banners web estáticos)</option>
+                            <option value="interstitial_app">Pantalla Completa App (Exclusivo para app móvil)</option>
+                        </select>
+                        <p class="hint">Revisa el "Manual y Formatos" en el menú para entender las dimensiones de cada uno.</p>
+                    </div>
+                </div>
+
+                <div class="panel-card" id="section-media">
+                    <h3><i class="fa-solid fa-4"></i> Carga de Assets</h3>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Sube tu Video (MP4) o Imagen (JPG, PNG)</label>
+                        <input type="file" id="ad-media-file" accept="video/mp4,image/jpeg,image/png,image/webp">
+                        <p class="hint">Servido a través de nuestra red CDN global de latencia ultrabaja (Cloudflare R2).</p>
+                    </div>
+                </div>
+
+                <div class="panel-card" id="section-text" style="display: none;">
+                    <h3><i class="fa-solid fa-5"></i> Guion de Locución (Presentador IA)</h3>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Escribe exactamente lo que dirá el presentador de noticias</label>
+                        <textarea id="ad-text" rows="3" placeholder="Ej: Visita nuestra nueva sucursal y obtén un 20% de descuento usando el código NOTICIAS..."></textarea>
+                        <p class="hint">Recuerda: El presentador hará la transición orgánica ("Este espacio fue presentado por...").</p>
+                    </div>
+                </div>
+
+                <button id="btn-submit" class="btn btn-primary btn-full" style="padding: 20px; font-size: 1.2rem; box-shadow: 0 10px 25px rgba(37,99,235,0.3);" onclick="submitCampaign()">
+                    <i class="fa-solid fa-rocket"></i> Enviar Campaña a Revisión
+                </button>
+            </section>
+
+            <!-- ==========================================
+                 SECCIÓN 4: MANUAL Y FORMATOS (HELP CENTER)
+            =========================================== -->
+            <section id="manual" class="section-view">
+                <div class="page-header">
+                    <h2>Manual de Formatos y Especificaciones</h2>
+                    <p>Conoce exactamente cómo funciona cada tipo de anuncio para preparar tus recursos gráficos.</p>
+                </div>
+
+                <div class="panel-card">
+                    <div class="help-item">
+                        <div class="help-header" onclick="toggleHelp(this)">
+                            <span><i class="fa-solid fa-robot"></i> 1. Mención Patrocinada (Recomendado)</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                        <div class="help-body">
+                            <p><strong>¿Qué es?</strong> Es la integración más natural. El presentador de noticias termina su relato y menciona tu marca en voz alta.</p>
+                            <p style="margin-top:10px;"><strong>¿Qué debes subir?</strong> Una imagen (Logo o Banner) o un video sin audio (B-Roll). Nuestro sistema lo adaptará al formato del noticiero, desenfocando los bordes elegantemente.</p>
+                            <p style="margin-top:10px;"><strong>Guion:</strong> Debes rellenar el campo "Guion de Locución". La IA lo leerá con voz humana profesional.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-item">
+                        <div class="help-header" onclick="toggleHelp(this)">
+                            <span><i class="fa-solid fa-tv"></i> 2. Pausa Comercial (Video Incrustado)</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                        <div class="help-body">
+                            <p><strong>¿Qué es?</strong> Es un comercial de televisión clásico. La noticia se detiene, el presentador avisa de la pausa, y entra tu video.</p>
+                            <p style="margin-top:10px;"><strong>¿Qué debes subir?</strong> Obligatoriamente un archivo de video <strong>MP4</strong> que contenga su propio audio.</p>
+                            <p style="margin-top:10px;"><strong>Nota Técnica:</strong> El sistema ecualizará tu audio y ajustará los píxeles para que no haya saltos de volumen al entrar.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-item">
+                        <div class="help-header" onclick="toggleHelp(this)">
+                            <span><i class="fa-solid fa-clone"></i> 3. Banner Flotante en Video</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                        <div class="help-body">
+                            <p><strong>¿Qué es?</strong> Publicidad no intrusiva. Mientras se dan las noticias, tu logo o imagen se desliza desde la parte superior derecha de la pantalla y se queda allí por unos segundos.</p>
+                            <p style="margin-top:10px;"><strong>Regla de Oro:</strong> Para evitar fallos en el motor de video, <strong>sube imágenes cuyas medidas de ancho y alto sean números PARES</strong> (Ej: 400x400px o 500x300px). Evita tamaños impares como 400x233px.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-item">
+                        <div class="help-header" onclick="toggleHelp(this)">
+                            <span><i class="fa-solid fa-desktop"></i> 4. Banners Web y App (Display)</span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </div>
+                        <div class="help-body">
+                            <p><strong>¿Qué es?</strong> Anuncios estáticos que solo se muestran en el portal web (noticias.lat) o en la aplicación móvil.</p>
+                            <p style="margin-top:10px;"><strong>¿Cómo se usa?</strong> Elige el tipo "Solo Display Gráfico" y asegúrate de marcar las casillas "Portal Web" o "Aplicación Móvil" en el paso 2 de creación de campaña.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==========================================
+                 SECCIONES PRÓXIMAMENTE (ESCALABILIDAD)
+            =========================================== -->
+            <section id="billing" class="section-view">
+                <div class="page-header"><h2>Facturación y Pagos</h2></div>
+                <div class="panel-card" style="text-align: center; padding: 60px 20px;">
+                    <i class="fa-solid fa-file-invoice-dollar" style="font-size: 4rem; color: var(--border); margin-bottom: 20px;"></i>
+                    <h3 style="border:none; padding:0; margin-bottom: 10px;">Módulo en Desarrollo</h3>
+                    <p style="color: var(--text-muted);">Próximamente podrás descargar tus comprobantes fiscales y añadir métodos de pago automáticos.</p>
+                </div>
+            </section>
+
+            <section id="audience" class="section-view">
+                <div class="page-header"><h2>Insights de Audiencia</h2></div>
+                <div class="panel-card" style="text-align: center; padding: 60px 20px;">
+                    <i class="fa-solid fa-users-viewfinder" style="font-size: 4rem; color: var(--border); margin-bottom: 20px;"></i>
+                    <h3 style="border:none; padding:0; margin-bottom: 10px;">Big Data Engine</h3>
+                    <p style="color: var(--text-muted);">Estamos calibrando los algoritmos de IA para ofrecerte mapas de calor y demografía exacta de los clics.</p>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- MODAL URLS -->
+    <div id="modal-urls">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 style="color: var(--text-main); font-weight: 800;"><i class="fa-solid fa-link" style="color: var(--primary);"></i> Enlaces de Publicación</h3>
+                <button class="btn btn-outline" style="padding: 8px 15px; border-radius: 50%;" onclick="closeUrlModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" id="urls-list-body">
+                <!-- Se inyectan los links vía JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT DE LOGICA -->
+    <script>
+        let currentClientId = null;
+        let globalAdsData = [];
+
+        // Utilidad Anti-XSS
+        function escapeHTML(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[tag] || tag));
+        }
+
+        // Toasts Animados
+        function showToast(title, message, type="success") {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let color = type === 'success' ? 'var(--success)' : (type === 'error' ? 'var(--danger)' : 'var(--primary)');
+            toast.className = `toast`;
+            toast.style.borderLeftColor = color;
+            toast.innerHTML = `<strong style="color:${color}; font-size:1.05rem;">${title}</strong><br><span style="font-size:0.9rem; color:var(--text-muted); display:block; margin-top:5px;">${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // Accordion del Manual
+        function toggleHelp(element) {
+            const body = element.nextElementSibling;
+            const icon = element.querySelector('.fa-chevron-down');
+            if(body.classList.contains('active')) {
+                body.classList.remove('active');
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                body.classList.add('active');
+                icon.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        // Lógica de Formulario Dinámico
+        function toggleAdFields() {
+            const type = document.getElementById('ad-type').value;
+            const textSection = document.getElementById('section-text');
+            
+            if (type === 'mencion_ia') {
+                textSection.style.display = 'block';
+            } else {
+                textSection.style.display = 'none';
+                document.getElementById('ad-text').value = ""; 
+            }
+            
+            // Sugerencia inteligente de Checkboxes
+            const chkVideo = document.getElementById('chk-video');
+            const chkWeb = document.getElementById('chk-web');
+            const chkApp = document.getElementById('chk-app');
+            
+            if (type === 'banner_web' || type === 'interstitial_app') {
+                chkVideo.checked = false; chkWeb.checked = true; chkApp.checked = true;
+            } else {
+                chkVideo.checked = true; chkWeb.checked = true;
+            }
+        }
+
+        // Navegación
+        function navigate(sectionId, element) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            document.querySelectorAll('.section-view').forEach(el => el.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+        }
+
+        // Inicialización y Login
+        window.onload = function() {
+            const savedId = localStorage.getItem('lfaf_client_id');
+            const savedName = localStorage.getItem('lfaf_client_name');
+            if (savedId && savedName) { setupSession(savedId, savedName); }
+            toggleAdFields(); 
+        };
+
+        async function login() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            try {
+                const res = await axios.post('/api/ads/advertiser/login', { email, password });
+                setupSession(res.data.advertiserId, res.data.empresa);
+                showToast("¡Bienvenido!", "Conexión segura al panel de la agencia.");
+            } catch (err) {
+                showToast("Error de Acceso", "Correo o contraseña incorrectos.", "error");
+            }
+        }
+
+        function setupSession(id, name) {
+            currentClientId = id;
+            localStorage.setItem('lfaf_client_id', id);
+            localStorage.setItem('lfaf_client_name', name);
+            
+            document.getElementById('header-client-name').textContent = name;
+            document.getElementById('header-avatar').textContent = name.charAt(0).toUpperCase();
+            document.getElementById('login-overlay').style.display = 'none';
+            
+            loadDashboardData();
+        }
+
+        function logout() {
+            localStorage.removeItem('lfaf_client_id');
+            localStorage.removeItem('lfaf_client_name');
+            location.reload();
+        }
+
+        // Carga de Datos desde la API
+        async function loadDashboardData() {
+            try {
+                const res = await axios.get(`/api/ads/advertiser/${currentClientId}/dashboard`);
+                globalAdsData = res.data.ads;
+                renderDashboardStats();
+                renderAllCampaigns();
+            } catch (err) { showToast("Error", "No se pudieron cargar las métricas.", "error"); }
+        }
+
+        function renderDashboardStats() {
+            let tViews = 0, tClicks = 0, cActivas = 0;
+            const topBody = document.getElementById('top-ads-body');
+            topBody.innerHTML = "";
+            
+            const sortedAds = [...globalAdsData].sort((a, b) => (b.vistasWeb + b.vistasApp) - (a.vistasWeb + a.vistasApp));
+            
+            globalAdsData.forEach((ad, index) => {
+                const views = ad.vistasWeb + ad.vistasApp;
+                const clicks = ad.clicksWeb + ad.clicksApp;
+                tViews += views; tClicks += clicks;
+                if (ad.estado === 'activo') cActivas++;
+                
+                if(index < 5) {
+                    const ctr = views > 0 ? ((clicks / views) * 100).toFixed(2) + '%' : '0.00%';
+                    topBody.innerHTML += `
+                        <tr>
+                            <td style="font-weight:700; color:var(--text-main);">${escapeHTML(ad.nombreCampana)}</td>
+                            <td><span class="badge bg-info">${escapeHTML(ad.tipo.replace('_', ' '))}</span></td>
+                            <td style="font-weight:600;">${views.toLocaleString()}</td>
+                            <td style="font-weight:600; color:var(--primary);">${clicks.toLocaleString()}</td>
+                            <td style="font-weight:700; color:var(--success);">${ctr}</td>
+                        </tr>
+                    `;
+                }
+            });
+            if(globalAdsData.length === 0) { topBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px;">Aún no hay telemetría disponible.</td></tr>`; }
+            
+            document.getElementById('stat-views').textContent = tViews.toLocaleString();
+            document.getElementById('stat-clicks').textContent = tClicks.toLocaleString();
+            document.getElementById('stat-active').textContent = cActivas;
+            
+            const generalCtr = tViews > 0 ? ((tClicks / tViews) * 100).toFixed(2) + '%' : '0.00%';
+            document.getElementById('stat-ctr').textContent = generalCtr;
+        }
+
+        function renderAllCampaigns() {
+            const allBody = document.getElementById('all-ads-body');
+            allBody.innerHTML = "";
+            if(globalAdsData.length === 0) { allBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px;">No tienes campañas registradas en la red.</td></tr>`; return; }
+            
+            globalAdsData.forEach(ad => {
+                const views = ad.vistasWeb + ad.vistasApp;
+                const clicks = ad.clicksWeb + ad.clicksApp;
+                
+                let badgeClass = 'bg-warning'; let badgeText = 'REVISIÓN';
+                if(ad.estado === 'activo') { badgeClass = 'bg-success'; badgeText = 'ACTIVO'; }
+                if(ad.estado === 'pausado') { badgeClass = 'bg-warning'; badgeText = 'PAUSADO'; }
+                
+                // Omnichannel Badges
+                let omniIcons = '';
+                if(ad.mostrarEnVideo) omniIcons += '<i class="fa-brands fa-youtube" style="color:#ef4444; margin-right:8px;" title="Video"></i>';
+                if(ad.mostrarEnWeb) omniIcons += '<i class="fa-solid fa-globe" style="color:#3b82f6; margin-right:8px;" title="Web"></i>';
+                if(ad.mostrarEnApp) omniIcons += '<i class="fa-solid fa-mobile-screen" style="color:#10b981;" title="App"></i>';
+                if(!omniIcons) omniIcons = '<span style="font-size:0.8rem; color:#94a3b8;">Sin Destinos</span>';
+
+                const numUrls = ad.publicaciones ? ad.publicaciones.length : 0;
+                let btnUrls = `<button class="btn btn-outline" style="padding: 8px 15px; font-size:0.85rem;" onclick="openUrlModal('${ad._id}')"><i class="fa-solid fa-link"></i> Ver ${numUrls}</button>`;
+                if (numUrls === 0) btnUrls = `<span style="color:var(--text-muted); font-size:0.85rem;"><i class="fa-solid fa-clock"></i> Desplegando...</span>`;
+                
+                allBody.innerHTML += `
+                    <tr>
+                        <td>
+                            <strong style="color:var(--text-main); font-size:1.05rem;">${escapeHTML(ad.nombreCampana)}</strong><br>
+                            <span style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${escapeHTML(ad.tipo.replace('_', ' '))}</span>
+                        </td>
+                        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                        <td style="font-size:1.2rem;">${omniIcons}</td>
+                        <td style="font-weight:600;"><i class="fa-solid fa-eye" style="color:var(--text-muted);"></i> ${views.toLocaleString()} &nbsp;&nbsp; <i class="fa-solid fa-hand-pointer" style="color:var(--primary);"></i> <span style="color:var(--primary)">${clicks.toLocaleString()}</span></td>
+                        <td>${btnUrls}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // =======================================================
+        // MODAL DE URLs
+        // =======================================================
+        function openUrlModal(adId) {
+            const ad = globalAdsData.find(a => a._id === adId);
+            const listBody = document.getElementById('urls-list-body');
+            listBody.innerHTML = "";
+            if(!ad || !ad.publicaciones || ad.publicaciones.length === 0) {
+                listBody.innerHTML = "<p style='color:var(--text-muted); text-align:center;'>La IA aún no ha inyectado enlaces públicos para esta campaña.</p>";
+            } else {
+                ad.publicaciones.forEach(pub => {
+                    const icon = pub.plataforma === 'youtube' ? '<i class="fa-brands fa-youtube" style="color:#ef4444;"></i>' : '<i class="fa-solid fa-globe" style="color:#3b82f6;"></i>';
+                    const date = new Date(pub.fechaPublicacion).toLocaleDateString();
+                    listBody.innerHTML += `
+                        <div class="url-item">
+                            <div>
+                                <span style="font-size:1.5rem; margin-right:15px;">${icon}</span>
+                                <strong style="font-size:1.1rem;">${escapeHTML(pub.plataforma.toUpperCase())}</strong>
+                                <p style="font-size:0.85rem; color:var(--text-muted); margin-top:5px;"><i class="fa-solid fa-calendar-day"></i> Inyectado: ${date}</p>
+                            </div>
+                            <a href="${escapeHTML(pub.urlPublicacion)}" target="_blank" class="btn btn-outline" style="padding: 10px 20px;">Revisar Tráfico <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById('modal-urls').style.display = 'flex';
+        }
+        function closeUrlModal() { document.getElementById('modal-urls').style.display = 'none'; }
+
+        // =======================================================
+        // SUBIDA DE CAMPAÑA (R2 + MONGODB)
+        // =======================================================
+        async function submitCampaign() {
+            const nombreCampana = document.getElementById('ad-name').value;
+            const fileInput = document.getElementById('ad-media-file');
+            const file = fileInput.files[0];
+            const adType = document.getElementById('ad-type').value;
+            
+            // Recoger valores de los checkboxes omnicanal
+            const mostrarEnVideo = document.getElementById('chk-video').checked;
+            const mostrarEnWeb = document.getElementById('chk-web').checked;
+            const mostrarEnApp = document.getElementById('chk-app').checked;
+
+            if (!nombreCampana || !file) { showToast("Datos Incompletos", "El nombre de campaña y el asset visual son obligatorios.", "error"); return; }
+            if (!mostrarEnVideo && !mostrarEnWeb && !mostrarEnApp) { showToast("Destino Vacío", "Debes elegir al menos una plataforma (Video, Web o App).", "error"); return;}
+
+            const btnSubmit = document.getElementById('btn-submit');
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = `<i class="fa-solid fa-cloud-arrow-up fa-bounce"></i> Subiendo al CDN Global...`;
+            
+            try {
+                // 1. Subir archivo a Cloudflare R2
+                const formData = new FormData();
+                formData.append('media', file);
+                const uploadRes = await axios.post('/api/ads/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+                const mediaUrlPublica = uploadRes.data.url;
+                
+                // 2. Crear campaña en BD
+                const payload = {
+                    advertiserId: currentClientId,
+                    nombreCampana: nombreCampana,
+                    tipo: adType,
+                    mediaUrl: mediaUrlPublica,
+                    textoMencion: adType === 'mencion_ia' ? document.getElementById('ad-text').value : '',
+                    enlaceDestino: document.getElementById('ad-link').value,
+                    limiteVideos: document.getElementById('ad-limit').value,
+                    mostrarEnVideo: mostrarEnVideo,
+                    mostrarEnWeb: mostrarEnWeb,
+                    mostrarEnApp: mostrarEnApp
+                };
+                await axios.post('/api/ads/client/ad', payload);
+                
+                showToast("¡Campaña Transmitida!", "Tus recursos están en revisión por los administradores.");
+                
+                // Limpiar
+                document.getElementById('ad-name').value = ""; document.getElementById('ad-text').value = ""; document.getElementById('ad-link').value = ""; fileInput.value = "";
+                await loadDashboardData();
+                navigate('campaigns', document.querySelectorAll('.nav-item')[1]);
+                
+            } catch (err) {
+                showToast("Fallo de Transmisión", err.response?.data?.error || err.message, "error");
+            } finally {
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = `<i class="fa-solid fa-rocket"></i> Enviar Campaña a Revisión`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -3,6 +3,7 @@
 
 const axios = require('axios');
 const Article = require('../models/article');
+const Ad = require('../models/ad');
 // Importamos el cliente Gemini Rotativo (asegurate de haber actualizado geminiClient.js)
 const { generateArticleContent, generateVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
 // ============================================================================
@@ -309,9 +310,25 @@ async function _triggerVideoBotWithRotation(article) {
         console.log(`[VideoBot] ♻️ Reutilizando MEGA JSON guardado en caché para: ${articleCheck.titulo}`);
         payload_escenas = articleCheck.escenasJSON;
     } else {
-        // SI NO EXISTE, LO CREAMOS Y LO GUARDAMOS
+       // SI NO EXISTE, LO CREAMOS Y LO GUARDAMOS
         console.log(`[VideoBot] 🧠 Construyendo nuevo guion de escenas con IA para: ${articleCheck.titulo}...`);
-        payload_escenas = await generateVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);
+
+        // ==========================================
+        // SISTEMA DE PUBLICIDAD: ELEGIR ANUNCIO
+        // ==========================================
+        // Buscamos un anuncio activo al azar usando la función $sample de MongoDB
+        const anunciosActivos = await Ad.aggregate([
+            { $match: { estado: 'activo' } },
+            { $sample: { size: 1 } }
+        ]);
+        const adData = anunciosActivos.length > 0 ? anunciosActivos[0] : null;
+        
+        if (adData) {
+            console.log(`  [Publicidad] Anuncio seleccionado: ${adData.nombreCampana} (Tipo: ${adData.tipo})`);
+        }
+
+        // Llamamos a Gemini pasándole los datos del anuncio
+        payload_escenas = await generateVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id, adData);
         
         // --- BLINDAJE ANTI-CENSURA ---
         if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
@@ -331,6 +348,12 @@ async function _triggerVideoBotWithRotation(article) {
 
         // GUARDAMOS EL JSON EN LA BASE DE DATOS PARA FUTUROS INTENTOS
         articleCheck.escenasJSON = payload_escenas;
+        
+        // Vinculamos el anuncio al artículo para las estadísticas y banners
+        if (adData) {
+            articleCheck.adId = adData._id;
+        }
+
         await articleCheck.save();
         console.log(`[VideoBot] 💾 MEGA JSON guardado en la base de datos exitosamente.`);
     }

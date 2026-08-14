@@ -42,6 +42,7 @@ const ArticleSchema = new mongoose.Schema({
     audioUrl: { type: String, default: null }, // Nuevo: URL del audio en Cloudflare
     aiSummary: { type: String, default: null }, // ¡AQUÍ GUARDAMOS EL RESUMEN ADELANTADO!
     escenasJSON: { type: Object, default: null },
+    adId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ad', default: null },
 
     fuente: String,
 

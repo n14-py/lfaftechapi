@@ -412,8 +412,78 @@ Cuerpo del guion completo. Redacción periodística. Largo sugerido: entre 250 a
 // ============================================================================
 // CREADOR DE ESCENAS PARA VIDEOS HORIZONTALES LARGOS (DIRECTOR DE TV ESTRICTO)
 // ============================================================================
-exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, articleId) => {
-        const contexto = textoLargo.substring(0, 8000);
+exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, articleId, adData = null) => {
+    const contexto = textoLargo.substring(0, 8000);
+
+    // ==========================================
+    // LÓGICA DE INYECCIÓN DE PUBLICIDAD PARA GEMINI
+    // ==========================================
+let adPrompt = "";
+    let ejemploAd = ""; 
+
+    if (adData) {
+        adPrompt = `
+    ¡ATENCIÓN! ESTE VIDEO CONTIENE UN ANUNCIO PATROCINADO. ES OBLIGATORIO INCLUIRLO (MÁXIMO 1 ANUNCIO POR VIDEO).
+    
+    DATOS DEL ANUNCIANTE:
+    - Marca/Campaña: "${adData.nombreCampana}"
+    - Tipo de anuncio a renderizar: "${adData.tipo}"
+    - Texto del cliente (si aplica): "${adData.textoMencion || ''}"
+    - Archivo Multimedia del anuncio: "${adData.mediaUrl}"
+
+    REGLAS DE INTEGRACIÓN SEGÚN EL TIPO DE ANUNCIO (Debes acatar estrictamente la regla del tipo "${adData.tipo}"):
+    
+    CASO A - Si el tipo es 'video_incrustado':
+    - El anuncio es un video externo que YA TIENE su propio audio. 
+    - ¡PROHIBIDO dedicar una escena entera solo para anunciar la pausa!
+    - Toma una escena normal de la noticia (por la mitad del video) y haz que el locutor termine su relato de forma natural añadiendo al final: "... [cierre de idea]. Hacemos una breve pausa publicitaria y enseguida regresamos."
+    - Inmediatamente después de esa escena, crea la escena del anuncio usando "type": "ad_video".
+    - ¡MUY IMPORTANTE! En esta escena "ad_video" ESTÁ PROHIBIDO incluir los campos "text", "voice", "bgm_mood" y "sfx_type". Solo debe tener "type", "layout_category" y "ad_media_url".
+
+    CASO B - Si el tipo es 'mencion_ia' (Patrocinador):
+    - ¡PROHIBIDO dedicar una escena entera solo a la publicidad!
+    - Convierte la ÚLTIMA escena de la noticia (la conclusión) en el anuncio, asignándole el "type": "ad_mencion".
+    - En el campo "text", el presentador debe PRIMERO terminar de dar la noticia y luego, de forma natural, hacer la mención: "... [cierre de la noticia]. Este espacio fue presentado por ${adData.nombreCampana}. ${adData.textoMencion}".
+    - Incluye el campo "ad_media_url": "${adData.mediaUrl}".
+
+    CASO C - Si el tipo es 'banner_flotante':
+    - LA LOCUCIÓN NO SE INTERRUMPE. El presentador sigue contando la noticia normalmente.
+    - Elige una escena aleatoria de tipo "body" o "pexels" por la mitad del video y simplemente agrégale la variable: "ad_banner_url": "${adData.mediaUrl}".
+    `;
+
+        // Generamos un ejemplo dinámico para que la IA "vea" exactamente lo que queremos
+        if (adData.tipo === 'video_incrustado') {
+            ejemploAd = `,
+        {
+          "type": "ad_video",
+          "layout_category": "sin_presentador",
+          "ad_media_url": "${adData.mediaUrl}"
+        }`;
+        } else if (adData.tipo === 'mencion_ia') {
+            ejemploAd = `,
+        {
+          "type": "ad_mencion",
+          "layout_category": "hombre",
+          "text": "En conclusión, los gremios hoteleros esperan que las cifras sigan mejorando el próximo mes. Este espacio fue presentado por ${adData.nombreCampana}. ${adData.textoMencion}",
+          "voice": "hombre_1",
+          "bgm_mood": "analisis",
+          "sfx_type": "transiciones",
+          "ad_media_url": "${adData.mediaUrl}"
+        }`;
+        } else if (adData.tipo === 'banner_flotante') {
+            ejemploAd = `,
+        {
+          "type": "pexels",
+          "termino_busqueda": "business presentation",
+          "layout_category": "mujer",
+          "text": "La economía sigue mostrando signos de recuperación según el último reporte.",
+          "voice": "mujer_1",
+          "bgm_mood": "tension",
+          "sfx_type": "alertas",
+          "ad_banner_url": "${adData.mediaUrl}"
+        }`;
+        }
+    }
 
     const prompt = `Eres el Director TÉCNICO de un noticiero de TV automatizado. Tu trabajo es transformar el texto de una noticia en un guion JSON estricto para un motor de renderizado FFmpeg.
 
@@ -422,23 +492,27 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
     Texto: "${contexto}"
     Imagen Principal: "${imagenPrincipal}"
 
+    ${adPrompt}
+
     REGLAS ABSOLUTAS Y CRÍTICAS (SI FALLAS, EL SISTEMA EXPLOTARÁ):
-    1. El campo "text" en TODAS las escenas es ÚNICA Y EXCLUSIVAMENTE lo que el locutor va a decir en voz alta (TTS). ¡NUNCA pongas descripciones de cámara o direcciones escénicas!
-    2. Si la escena es "type": "pexels", es OBLIGATORIO incluir el campo "termino_busqueda" con 2 o 3 palabras clave EN INGLÉS (ejemplo: "happy tourists", "ecuador beach", "economy graph").
+    1. El campo "text" en TODAS las escenas es ÚNICA Y EXCLUSIVAMENTE lo que el locutor va a decir en voz alta (TTS). ¡NUNCA pongas descripciones de cámara o direcciones escénicas! (A excepción de "ad_video" donde no debe existir el campo "text").
+    2. Si la escena es "type": "pexels", es OBLIGATORIO incluir el campo "termino_busqueda" con 2 o 3 palabras clave EN INGLÉS.
     3. Si la escena es "type": "body", NO incluyas "termino_busqueda", pero SÍ debes incluir "image_url" con la Imagen Principal.
-    4. MAPAS: Si la noticia menciona una ciudad, país o región clave, incluye MÁXIMO UNA escena con "type": "mapa" y agrega la variable "ubicacion" (ej: "Santa Elena, Ecuador").
-    5. LONGITUD DEL TEXTO: El campo "text" de cada escena debe tener entre 19 y 24 palabras. Redacta de forma analítica y profunda para estirar la información real en varias escenas sin mentir. La ÚNICA excepción es la "intro", que debe ser una frase corta de impacto (máximo 15 palabras).
-    6. CANTIDAD DE ESCENAS (¡CRÍTICO!): Debes generar OBLIGATORIAMENTE entre 15 y 21 escenas en total. Si el texto original es corto, expande la noticia explicando el contexto, las causas o las consecuencias para alcanzar el mínimo de escenas. ¡TIENES ESTRICTAMENTE PROHIBIDO inventar nombres, cifras, fechas o datos falsos! Usa solo los hechos reales.
+    4. MAPAS: Si la noticia menciona una ciudad, país o región clave, incluye MÁXIMO UNA escena con "type": "mapa" y agrega la variable "ubicacion".
+    5. LONGITUD DEL TEXTO: El campo "text" de cada escena debe tener entre 19 y 24 palabras. La ÚNICA excepción es la "intro" (máximo 15 palabras) y las menciones publicitarias.
+    6. CANTIDAD DE ESCENAS (¡CRÍTICO!): Debes generar OBLIGATORIAMENTE entre 15 y 21 escenas en total (incluyendo el anuncio si lo hay).
     7. DEVUELVE ÚNICAMENTE UN JSON VÁLIDO. SIN MARKDOWN, SIN TEXTO EXTRA.
 
-    DICCIONARIO DE VARIABLES PERMITIDAS (PROHIBIDO USAR "outro" O INVENTAR VARIABLES):
-    - "type": "intro", "body", "pexels", "mapa".
+    DICCIONARIO DE VARIABLES PERMITIDAS (PROHIBIDO INVENTAR OTRAS VARIABLES):
+    - "type": "intro", "body", "pexels", "mapa", "ad_video", "ad_mencion".
     - "layout_category": "hombre", "mujer", "sin_presentador".
-    - "voice": "hombre_1", "mujer_1".
-    - "bgm_mood": "urgencia", "analisis", "tension".
-    - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia".
+    - "voice": "hombre_1", "mujer_1" (OMITIR si la escena es "ad_video").
+    - "bgm_mood": "urgencia", "analisis", "tension" (OMITIR si la escena es "ad_video").
+    - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia" (OMITIR si la escena es "ad_video").
+    - "ad_media_url": URL de la foto/video publicitario (Aplica a ad_video o ad_mencion).
+    - "ad_banner_url": URL del banner publicitario (Aplica a body o pexels si es banner flotante).
 
-    FORMATO JSON EXACTO QUE DEBES REPLICAR (Imita esta estructura de alternancia y respeta la longitud de textos cortos):
+    FORMATO JSON EXACTO QUE DEBES REPLICAR (Imita esta estructura de alternancia y fíjate cómo se incrusta el anuncio en el ejemplo):
     {
       "youtube_title": "Título llamativo e informativo para la noticia",
       "youtube_description": "Descripción optimizada...",
@@ -460,48 +534,33 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
           "voice": "mujer_1",
           "bgm_mood": "analisis",
           "sfx_type": "transiciones"
-        },
-        {
-          "type": "pexels",
-          "termino_busqueda": "tourists beach sunny",
-          "layout_category": "hombre",
-          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando todas las expectativas económicas trazadas por los gremios.",
-          "voice": "hombre_1",
-          "bgm_mood": "tension",
-          "sfx_type": "alertas"
-        }
-        // ... CONTINÚA ALTERNANDO HASTA LLEGAR A LAS 9 o 10 ESCENAS EXACTAS ...
+        }${ejemploAd}
       ]
     }`;
 
     try {
-        console.log(`  [Gemini Director] Convirtiendo texto largo a JSON de escenas estricto...`);
+        console.log(`  [Gemini Director] Convirtiendo texto largo a JSON de escenas estricto (Con soporte de Anuncios)...`);
         let jsonText = await generateContentWithRetry(prompt);
-        
+                 
         jsonText = jsonText.replace(/\`\`\`json/gi, '').replace(/\`\`\`/g, '').trim();
-        
+                 
         const inicioJson = jsonText.indexOf('{');
         const finJson = jsonText.lastIndexOf('}');
-        
+                 
         if (inicioJson === -1 || finJson === -1) {
             throw new Error("La IA no devolvió llaves de JSON válidas.");
         }
-        
+                 
         const jsonLimpio = jsonText.substring(inicioJson, finJson + 1);
         const payloadParseado = JSON.parse(jsonLimpio);
-        
+                 
         // --- INYECCIÓN DE DESCRIPCIÓN PARA YOUTUBE ---
-        // Cortamos el texto original a 4500 caracteres para no pasarnos del límite de 5000 de YouTube
         const noticiaRecortada = textoLargo.substring(0, 4000);
-        
-        // Armamos la URL específica de la noticia
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
-        
-        payloadParseado.youtube_description = `👉 ¡Suscríbete al canal para no perderte ninguna noticia!\n🌐 Lee la noticia completa aquí: ${urlArticulo}\n\n` + noticiaRecortada;
-
-        
-        // --- PARCHE ANTI "n" PARA FFMPEG ---
-        // Buscamos cualquier salto de línea oculto (\n) y lo cambiamos por un espacio normal
+                 
+        payloadParseado.youtube_description = `🔔 ¡Suscríbete al canal para no perderte ninguna noticia!\n👉 Lee la noticia completa aquí: ${urlArticulo}\n\n` + noticiaRecortada;
+                 
+        // --- PARCHE ANTI "\\n" PARA FFMPEG ---
         if (payloadParseado.scenes) {
             payloadParseado.scenes.forEach(escena => {
                 if (escena.text) {
@@ -509,20 +568,15 @@ exports.generateVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, ar
                 }
             });
         }
-        // -----------------------------------
-
         return payloadParseado;
-
     } catch (error) {
         console.error(`  [Gemini Director] Error al crear/parsear escenas JSON: ${error.message}`);
-        
-        // PARCHE ANTI-BUCLE: Si la IA bloquea el contenido, enviamos una señal clara de muerte
+                 
         if (error.message && error.message.includes('PROHIBITED_CONTENT')) {
             console.error("  [Gemini Director] ⛔ CONTENIDO CENSURADO POR GOOGLE. Abortando noticia definitivamente.");
             return { error_fatal: "PROHIBITED_CONTENT" }; 
         }
-
-        return null; // Error normal (ej. mal JSON), se puede reintentar
+        return null;
     }
 };
 
