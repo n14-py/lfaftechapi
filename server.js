@@ -16,6 +16,7 @@ const apiRoutes = require('./routes/index');
 // --- Importamos los controladores de workers ---
 const syncController = require('./controllers/syncController');
 const syncShortsController = require('./controllers/syncShortsController');
+const pushScheduler = require('./utils/pushScheduler'); // <-- NUESTRO NUEVO RELOJ
 
 
 const app = express();
@@ -85,6 +86,7 @@ mongoose.connect(process.env.MONGODB_URI)
       syncController.startNewsWorker();
      
       syncShortsController.startShortsWorker();
+      pushScheduler.iniciarMotorPush();
       console.log("🤖 Worker Maestro iniciado (Modo: Bajo Demanda + Anti-Zombies)");
       
   })

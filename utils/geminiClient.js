@@ -442,13 +442,13 @@ let adPrompt = "";
 
     CASO B - Si el tipo es 'mencion_ia' (Patrocinador):
     - ¡PROHIBIDO dedicar una escena entera solo a la publicidad!
-    - Convierte la ÚLTIMA escena de la noticia (la conclusión) en el anuncio, asignándole el "type": "ad_mencion".
-    - En el campo "text", el presentador debe PRIMERO terminar de dar la noticia y luego, de forma natural, hacer la mención: "... [cierre de la noticia]. Este espacio fue presentado por ${adData.nombreCampana}. ${adData.textoMencion}".
+    - Convierte la TERCERA o CUARTA escena de la noticia en el anuncio, asignándole el "type": "ad_mencion". (Debe ser al inicio, no al final).
+    - En el campo "text", el presentador debe PRIMERO relatar la información de esa escena y luego, de forma natural, hacer la mención: "... [parte de la noticia]... Y antes de continuar con los detalles, este espacio es presentado por ${adData.nombreCampana}. ${adData.textoMencion}".
     - Incluye el campo "ad_media_url": "${adData.mediaUrl}".
 
     CASO C - Si el tipo es 'banner_flotante':
     - LA LOCUCIÓN NO SE INTERRUMPE. El presentador sigue contando la noticia normalmente.
-    - Elige una escena aleatoria de tipo "body" o "pexels" por la mitad del video y simplemente agrégale la variable: "ad_banner_url": "${adData.mediaUrl}".
+    - Elige ENTRE 2 Y 3 ESCENAS DISTINTAS (separadas entre sí) de tipo "body" o "pexels" a lo largo de todo el video, y a cada una de ellas agrégale la variable: "ad_banner_url": "${adData.mediaUrl}". ¡Es obligatorio que el banner aparezca en 2 o 3 escenas diferentes del mismo video!
     `;
 
         // Generamos un ejemplo dinámico para que la IA "vea" exactamente lo que queremos
@@ -555,10 +555,12 @@ let adPrompt = "";
         const payloadParseado = JSON.parse(jsonLimpio);
                  
         // --- INYECCIÓN DE DESCRIPCIÓN PARA YOUTUBE ---
+// --- INYECCIÓN DE DESCRIPCIÓN PARA YOUTUBE ---
         const noticiaRecortada = textoLargo.substring(0, 4000);
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
+        const appStoreLink = "https://play.google.com/store/apps/details?id=com.noticiaslat.app";
                  
-        payloadParseado.youtube_description = `🔔 ¡Suscríbete al canal para no perderte ninguna noticia!\n👉 Lee la noticia completa aquí: ${urlArticulo}\n\n` + noticiaRecortada;
+        payloadParseado.youtube_description = `📱 ¡Ve la noticia completa en la App!\n👉 Descárgala aquí: ${appStoreLink}\n\n🌐 Enlace directo a la noticia (Abre la app automáticamente o la web): ${urlArticulo}\n\n` + noticiaRecortada;
                  
         // --- PARCHE ANTI "\\n" PARA FFMPEG ---
         if (payloadParseado.scenes) {
