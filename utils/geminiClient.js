@@ -558,10 +558,9 @@ let adPrompt = "";
 // --- INYECCIÓN DE DESCRIPCIÓN PARA YOUTUBE ---
         const noticiaRecortada = textoLargo.substring(0, 4000);
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
-        const appStoreLink = "https://play.google.com/store/apps/details?id=com.noticiaslat.app";
-                 
-        payloadParseado.youtube_description = `📱 ¡Ve la noticia completa en la App!\n👉 Descárgala aquí: ${appStoreLink}\n\n🌐 Enlace directo a la noticia (Abre la app automáticamente o la web): ${urlArticulo}\n\n` + noticiaRecortada;
-                 
+        const appStoreLink = "https://play.google.com/store/apps/details?id=com.noticiaslat.app";  
+        //payloadParseado.youtube_description = `📱 ¡Ve la noticia completa en la App!\n👉 Descárgala aquí: ${appStoreLink}\n\n🌐 Enlace directo a la noticia (Abre la app automáticamente o la web): ${urlArticulo}\n\n` + noticiaRecortada;
+        payloadParseado.youtube_description = `📱 ¡Ve la noticia completa en la App!\n👉 Descárgala aquí: ${appStoreLink}\n\n🔍 O busca en la Play Store: "Noticias LAT"\n\n` + noticiaRecortada;         
         // --- PARCHE ANTI "\\n" PARA FFMPEG ---
         if (payloadParseado.scenes) {
             payloadParseado.scenes.forEach(escena => {
@@ -734,9 +733,10 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
         
         const noticiaRecortada = textoLargo.substring(0, 800); // Descripción corta para Shorts
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
-        
-        payloadParseado.youtube_description = `¡Suscríbete para más noticias!\n Lee la nota completa: ${urlArticulo}\n\n#shorts #noticias\n\n` + noticiaRecortada;
-        
+        const appStoreLink = "https://play.google.com/store/apps/details?id=com.noticiaslat.app";
+
+        //payloadParseado.youtube_description = `¡Suscríbete para más noticias!\n Lee la nota completa: ${urlArticulo}\n\n#shorts #noticias\n\n` + noticiaRecortada;
+        payloadParseado.youtube_description = `📺 ¡Siguenos para más noticias!\n\n📱 Lee la noticia completa descargando nuestra App:\n👉 ${appStoreLink}\n\n🔍 O busca en la Play Store: "Noticias LAT"\n\n#shorts #noticias\n\n` + noticiaRecortada;
         // Parche anti "\n" para FFmpeg
         if (payloadParseado.scenes) {
             payloadParseado.scenes.forEach(escena => {
