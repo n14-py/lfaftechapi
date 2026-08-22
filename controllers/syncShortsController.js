@@ -3,6 +3,7 @@
 
 const axios = require('axios');
 const Article = require('../models/article');
+const Ad = require('../models/ad'); // IMPORTAMOS EL MODELO DE ANUNCIOS
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
@@ -10,7 +11,7 @@ const { generateShortArticleContent, generateShortVideoScenesJSON, generateSumma
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
-    "http://3.133.55.254:3001" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
+    "http://169.58.190.226:3002" // IP DE TU SERVIDOR EXCLUSIVO DE SHORTS
 ];
 
 // Clave para comunicar con los bots (si la usan)
@@ -297,11 +298,27 @@ async function _triggerShortBotWithRotation(article) {
         // SI YA EXISTE, LO RECICLAMOS (Ahorramos Gemini)
         console.log(`[ShortBot] ♻️ Reutilizando MEGA JSON guardado en caché para: ${articleCheck.titulo}`);
         payload_escenas = articleCheck.escenasJSON;
-    } else {
+        } else {
         // SI NO EXISTE, LO CREAMOS Y LO GUARDAMOS
-        console.log(`[ShortBot] 🧠 Construyendo nuevo guion de escenas con IA para: ${articleCheck.titulo}...`);
-        payload_escenas = await generateShortVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id);
+        console.log(`[ShortBot]   Construyendo nuevo guion de escenas con IA para: ${articleCheck.titulo}...`);
         
+        // ==========================================
+        // SISTEMA DE PUBLICIDAD: ELEGIR ANUNCIO (PARA SHORTS)
+        // ==========================================
+        // Buscamos un anuncio al azar, pero EXCLUIMOS el video horizontal
+        const anunciosActivos = await Ad.aggregate([
+            { $match: { estado: 'activo', tipo: { $ne: 'video_incrustado' } } },
+            { $sample: { size: 1 } }
+        ]);
+        const adData = anunciosActivos.length > 0 ? anunciosActivos[0] : null;
+        
+        if (adData) {
+            console.log(`  [Publicidad Shorts] Anuncio seleccionado: ${adData.nombreCampana} (Tipo: ${adData.tipo})`);
+        }
+
+        payload_escenas = await generateShortVideoScenesJSON(articleCheck.titulo, articleCheck.articuloGenerado, articleCheck.imagen, articleCheck._id, adData);
+        
+        // --- BLINDAJE ANTI-CENSURA ---
         // --- BLINDAJE ANTI-CENSURA ---
         if (payload_escenas && payload_escenas.error_fatal === "PROHIBITED_CONTENT") {
             console.error(`[ShortBot] 🗑️ Descartando noticia tóxica/censurada para no atascar el servidor.`);
@@ -319,8 +336,14 @@ async function _triggerShortBotWithRotation(article) {
 
         // GUARDAMOS EL JSON EN LA BASE DE DATOS PARA FUTUROS INTENTOS
         articleCheck.escenasJSON = payload_escenas;
+
+        // Vinculamos el anuncio al Short para las estad sticas y banners
+        if (adData) {
+            articleCheck.adId = adData._id;
+        }
+
         await articleCheck.save();
-        console.log(`[ShortBot] 💾 MEGA JSON de Short guardado en la base de datos exitosamente.`);
+        console.log(`[ShortBot]   MEGA JSON de Short guardado en la base de datos exitosamente.`);
     }
 
     // Le inyectamos el ID de la base de datos al JSON para que Python sepa a quién pertenece

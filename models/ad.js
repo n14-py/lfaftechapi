@@ -9,7 +9,7 @@ const AdSchema = new mongoose.Schema({
     // El tipo de anuncio define en qué plataforma y formato se mostrará
     tipo: { 
         type: String, 
-        enum: ['banner_flotante', 'video_incrustado', 'mencion_ia', 'banner_web', 'interstitial_app'], 
+        enum: ['banner_flotante', 'video_incrustado', 'video_incrustado_short', 'mencion_ia', 'banner_web', 'interstitial_app'], 
         required: true 
     },
 

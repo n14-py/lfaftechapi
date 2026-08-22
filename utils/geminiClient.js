@@ -587,34 +587,108 @@ let adPrompt = "";
 
 
 // ============================================================================
-// ⏱️ CREADOR DE ESCENAS PARA SHORTS (DIRECTOR VERTICAL ESTRICTO 85 SEGUNDOS)
+// CREADOR DE ESCENAS PARA SHORTS (DIRECTOR VERTICAL ESTRICTO 80-82 SEGUNDOS)
 // ============================================================================
-exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, articleId) => {
+exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipal, articleId, adData = null) => {
     // Tomamos menos contexto porque un Short es más resumido
     const contexto = textoLargo.substring(0, 3000);
+    
+    // --- LÓGICA DE INYECCIÓN DE PUBLICIDAD PARA SHORTS ---
+    let adPrompt = "";
+    let ejemploAd = "";
+    let limitePalabras = "195 a 205"; // 80 segundos exactos (a 2.5 palabras por seg)
+    let cantidadEscenas = "8 a 9";
+
+    if (adData) {
+        adPrompt = `
+    ¡ATENCIÓN! ESTE SHORT CONTIENE UN ANUNCIO PATROCINADO. ES OBLIGATORIO INCLUIRLO (MÁXIMO 1 ANUNCIO POR VIDEO).
+    
+    DATOS DEL ANUNCIANTE:
+    - Marca/Campaña: "${adData.nombreCampana}"
+    - Tipo de anuncio a renderizar: "${adData.tipo}"
+    - Texto del cliente (si aplica): "${adData.textoMencion || ''}"
+    - Archivo Multimedia del anuncio: "${adData.mediaUrl}"
+
+    REGLAS DE INTEGRACIÓN SEGÚN EL TIPO DE ANUNCIO (Debes acatar estrictamente la regla del tipo "${adData.tipo}"):
+    
+    CASO A - Si el tipo es 'video_incrustado_short':
+    - El anuncio es un comercial externo a pantalla completa.
+    - ¡CÁLCULO DE TIEMPO CRÍTICO!: Este anuncio durará entre 10 y 15 segundos. Por lo tanto, el texto narrado de tu guion debe ser MÁS CORTO para no pasarnos de los 82 segundos en total.
+    - Toma una escena de la noticia (por la mitad) y haz que el locutor diga: "... [cierre de idea]. Hacemos una breve pausa y enseguida regresamos."
+    - Inmediatamente después, crea la escena del anuncio usando "type": "ad_video".
+    - ¡PROHIBIDO! En "ad_video" NO DEBE EXISTIR el campo "text", "voice", "bgm_mood" ni "sfx_type". Solo "type", "layout_category" y "ad_media_url".
+
+    CASO B - Si el tipo es 'mencion_ia' (Patrocinador):
+    - Convierte la SEGUNDA o TERCERA escena en el anuncio, asignándole el "type": "ad_mencion".
+    - En el campo "text", el presentador debe relatar la noticia y conectar sutilmente: "... [parte de la noticia]... Y antes de continuar, este espacio es presentado por ${adData.nombreCampana}. ${adData.textoMencion}".
+    - Incluye el campo "ad_media_url": "${adData.mediaUrl}".
+
+    CASO C - Si el tipo es 'banner_flotante':
+    - La locución no se interrumpe.
+    - Elige 2 ESCENAS DISTINTAS de tipo "body" o "pexels" y agrégales la variable: "ad_banner_url": "${adData.mediaUrl}".
+    `;
+
+        if (adData.tipo === 'video_incrustado_short') {
+            limitePalabras = "150 a 160"; // Reducimos palabras para dar espacio al comercial
+            cantidadEscenas = "7 a 8";
+            ejemploAd = `,
+        {
+          "type": "ad_video",
+          "layout_category": "sin_presentador",
+          "ad_media_url": "${adData.mediaUrl}"
+        }`;
+        } else if (adData.tipo === 'mencion_ia') {
+            ejemploAd = `,
+        {
+          "type": "ad_mencion",
+          "layout_category": "hombre",
+          "text": "El flujo de vehículos superó el millón en todo el país. Este espacio fue presentado por ${adData.nombreCampana}. ${adData.textoMencion}",
+          "voice": "hombre_1",
+          "bgm_mood": "analisis",
+          "sfx_type": "transiciones",
+          "ad_media_url": "${adData.mediaUrl}"
+        }`;
+        } else if (adData.tipo === 'banner_flotante') {
+            ejemploAd = `,
+        {
+          "type": "pexels",
+          "termino_busqueda": "tourists beach sunny",
+          "layout_category": "hombre",
+          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando las expectativas.",
+          "voice": "hombre_1",
+          "bgm_mood": "tension",
+          "sfx_type": "alertas",
+          "ad_banner_url": "${adData.mediaUrl}"
+        }`;
+        }
+    }
 
     const prompt = `Eres el Director TÉCNICO de un canal de YouTube Shorts automatizado. Tu trabajo es transformar el texto de una noticia en un guion JSON estricto para un motor de renderizado FFmpeg vertical.
-
+    
     NOTICIA A CONVERTIR:
     Título: "${titulo}"
     Texto: "${contexto}"
     Imagen Principal: "${imagenPrincipal}"
-
+    
+    ${adPrompt}
+    
     REGLAS ABSOLUTAS Y CRÍTICAS (SI FALLAS, EL SISTEMA EXPLOTARÁ):
     1. El campo "text" en TODAS las escenas es ÚNICA Y EXCLUSIVAMENTE lo que el locutor va a decir en voz alta (TTS). ¡NUNCA pongas descripciones de cámara!
     2. Si la escena es "type": "pexels", es OBLIGATORIO incluir "termino_busqueda" con 2 o 3 palabras clave EN INGLÉS.
     3. Si la escena es "type": "body", NO incluyas "termino_busqueda", pero SÍ debes incluir "image_url" con la Imagen Principal.
     4. MAPAS: Si la noticia menciona un lugar clave, incluye MÁXIMO UNA escena con "type": "mapa" y la variable "ubicacion".
-    5. CANTIDAD DE ESCENAS (¡CRÍTICO!): Debes generar EXACTAMENTE entre 9 y 10 escenas en total (1 intro y 8 o 9 de desarrollo). Esto es VITAL para que el Short dure exactamente 85 segundos.
-    6. LONGITUD DEL TEXTO: La "intro" debe tener máximo 15 palabras. Las demás escenas deben tener EXACTAMENTE entre 20 y 25 palabras cada una. El total de palabras de todos los "text" sumados DEBE estar entre 210 y 220 palabras.
+    5. CANTIDAD DE ESCENAS (¡CRÍTICO!): Debes generar EXACTAMENTE entre ${cantidadEscenas} escenas en total (incluyendo intros y anuncios).
+    6. MATEMÁTICA DEL TIEMPO (¡CRÍTICO!): Para que el Short dure exactamente 80 a 82 segundos, el total de palabras de todos los campos "text" sumados DEBE estar ESTRICTAMENTE entre ${limitePalabras} palabras. Distribuye estas palabras entre las escenas (aprox 20-25 palabras por escena, intro de 10-15 palabras).
     7. DEVUELVE ÚNICAMENTE UN JSON VÁLIDO. SIN MARKDOWN, SIN TEXTO EXTRA.
 
     DICCIONARIO DE VARIABLES PERMITIDAS:
-    - "type": "intro", "body", "pexels", "mapa".
+    - "type": "intro", "body", "pexels", "mapa", "ad_video", "ad_mencion".
     - "layout_category": "hombre", "mujer", "sin_presentador".
-    - "voice": "hombre_1", "mujer_1".
-    - "bgm_mood": "urgencia", "analisis", "tension".
-    - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia".
+    - "voice": "hombre_1", "mujer_1" (OMITIR si es "ad_video").
+    - "bgm_mood": "urgencia", "analisis", "tension" (OMITIR si es "ad_video").
+    - "sfx_type": "impactos", "transiciones", "alertas", "tecnologia" (OMITIR si es "ad_video").
+    - "ad_media_url": URL de la foto/video publicitario (Para ad_video o ad_mencion).
+    - "ad_banner_url": URL del banner (Para body o pexels si es banner_flotante).
 
     FORMATO JSON EXACTO QUE DEBES REPLICAR:
     {
@@ -638,22 +712,12 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
           "voice": "mujer_1",
           "bgm_mood": "analisis",
           "sfx_type": "transiciones"
-        },
-        {
-          "type": "pexels",
-          "termino_busqueda": "tourists beach sunny",
-          "layout_category": "hombre",
-          "text": "Destinos costeros y de montaña alcanzaron una impresionante ocupación hotelera del cien por ciento, superando todas las expectativas económicas trazadas por los gremios.",
-          "voice": "hombre_1",
-          "bgm_mood": "tension",
-          "sfx_type": "alertas"
-        }
-        // ... CONTINÚA ALTERNANDO HASTA LLEGAR A LAS 9 o 10 ESCENAS EXACTAS ...
+        }${ejemploAd}
       ]
     }`;
-    
+
     try {
-        console.log(`  [Gemini Shorts Director] Calculando métricas... Creando JSON para Short de 85s...`);
+        console.log(`  [Gemini Shorts Director] Calculando métricas... Creando JSON para Short de 82s (Con soporte de Anuncios)...`);
         let jsonText = await generateContentWithRetry(prompt);
         
         jsonText = jsonText.replace(/\`\`\`json/gi, '').replace(/\`\`\`/g, '').trim();
@@ -668,12 +732,12 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
         const jsonLimpio = jsonText.substring(inicioJson, finJson + 1);
         const payloadParseado = JSON.parse(jsonLimpio);
         
-        const noticiaRecortada = textoLargo.substring(0, 800); // Descripción más corta para Shorts
+        const noticiaRecortada = textoLargo.substring(0, 800); // Descripción corta para Shorts
         const urlArticulo = articleId ? `https://www.noticias.lat/articulo/${articleId}` : "https://noticias.lat";
         
-        payloadParseado.youtube_description = `👉 ¡Suscríbete para más noticias!\n🌐 Lee la nota completa: ${urlArticulo}\n\n#shorts #noticias\n\n` + noticiaRecortada;
-
-        // Parche anti "n" para FFmpeg
+        payloadParseado.youtube_description = `¡Suscríbete para más noticias!\n Lee la nota completa: ${urlArticulo}\n\n#shorts #noticias\n\n` + noticiaRecortada;
+        
+        // Parche anti "\n" para FFmpeg
         if (payloadParseado.scenes) {
             payloadParseado.scenes.forEach(escena => {
                 if (escena.text) {
@@ -681,13 +745,11 @@ exports.generateShortVideoScenesJSON = async (titulo, textoLargo, imagenPrincipa
                 }
             });
         }
-
         return payloadParseado;
-
     } catch (error) {
         console.error(`  [Gemini Shorts Director] Error al crear JSON: ${error.message}`);
         if (error.message && error.message.includes('PROHIBITED_CONTENT')) {
-            console.error("  [Gemini Shorts Director] ⛔ CONTENIDO CENSURADO. Abortando.");
+            console.error("  [Gemini Shorts Director]   CONTENIDO CENSURADO. Abortando.");
             return { error_fatal: "PROHIBITED_CONTENT" }; 
         }
         return null;

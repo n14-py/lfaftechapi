@@ -319,7 +319,7 @@ async function _triggerVideoBotWithRotation(article) {
         // ==========================================
         // Buscamos un anuncio activo al azar usando la función $sample de MongoDB
         const anunciosActivos = await Ad.aggregate([
-            { $match: { estado: 'activo' } },
+            { $match: { estado: 'activo', tipo: { $ne: 'video_incrustado_short' } } },
             { $sample: { size: 1 } }
         ]);
         const adData = anunciosActivos.length > 0 ? anunciosActivos[0] : null;
