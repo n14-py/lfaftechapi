@@ -39,7 +39,7 @@ function getModel() {
     
     // Usamos el modelo con los filtros apagados al máximo (BLOCK_NONE)
     return genAI.getGenerativeModel({ 
-        model: "gemma-4-31b-it", 
+        model: "gemini-2.5-flash", 
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
