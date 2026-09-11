@@ -6,6 +6,7 @@ const Article = require('../models/article');
 const Ad = require('../models/ad');
 // Importamos el cliente Gemini Rotativo (asegurate de haber actualizado geminiClient.js)
 const { generateArticleContent, generateVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
+const { isOnceNews } = require('../utils/onceFilter');
 // ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
@@ -285,6 +286,14 @@ exports.runNewsAPIFetch = runNewsAPIFetch;
 // 6. EL GESTOR DE BOTS (DISPATCHER)
 // ============================================================================
 async function _triggerVideoBotWithRotation(article) {
+    if (isOnceNews(article)) {
+        console.log(`[VideoBot] 🚫 ONCE detectado. No se genera JSON ni se envía a YouTube: ${article.titulo || article.title}`);
+        if (article._id) {
+            await Article.updateOne({ _id: article._id }, { $set: { videoProcessingStatus: 'skipped_once' } });
+        }
+        return;
+    }
+
     if (VIDEO_BOT_URLS.length === 0) {
         console.warn(`[VideoBot] ⚠️ ERROR: No hay URLs de bots configuradas.`);
         return;
@@ -417,6 +426,7 @@ async function _triggerVideoBotWithRotation(article) {
 // 🎧 MICROSERVICIO: PEDIR AUDIO A PYTHON
 // ============================================================================
 async function _triggerAudioBot(article) {
+    if (isOnceNews(article)) return;
     if (VIDEO_BOT_URLS.length === 0) return;
     
     // Usamos el mismo bot rotativo o el primero
@@ -534,6 +544,16 @@ async function _runNewsWorker() {
                 const resumenIA = await generateSummaryWithGemini(articuloGenerado);
 
                 // Guardamos en Base de Datos
+                const esOnce = isOnceNews({
+                    titulo: tituloViral || articleToProcess.title,
+                    title: articleToProcess.title,
+                    descripcion: articleToProcess.description,
+                    articuloGenerado,
+                    enlaceOriginal: articleToProcess.url,
+                    url: articleToProcess.url,
+                    fuente: articleToProcess.source && articleToProcess.source.name
+                });
+
                 const newArticle = new Article({
                     titulo: tituloViral || articleToProcess.title, 
                     descripcion: articleToProcess.description,
@@ -548,17 +568,21 @@ async function _runNewsWorker() {
                     imageText: textoImagen, // Guardamos el texto para la miniatura
                     aiSummary: resumenIA, // <--- GUARDAMOS EL RESUMEN AQUÍ
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending' // <--- IMPORTANTE: Queda lista para ser tomada por un bot
+                    videoProcessingStatus: esOnce ? 'skipped_once' : 'pending'
                 });
                 
                 await newArticle.save();
                 console.log(`[News Worker] 💾 Guardada en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
-                // 5. INTENTO INMEDIATO DE VIDEO
-                // Intentamos enviarla a un bot ya mismo
-                _triggerAudioBot(newArticle);
+                if (esOnce) {
+                    console.log(`[News Worker] 🚫 ONCE: se publica en la web, no se genera JSON ni se envía a YouTube. Pasando a otra noticia.`);
+                } else {
+                    // 5. INTENTO INMEDIATO DE VIDEO
+                    // Intentamos enviarla a un bot ya mismo
+                    _triggerAudioBot(newArticle);
 
-                await _triggerVideoBotWithRotation(newArticle);
+                    await _triggerVideoBotWithRotation(newArticle);
+                }
                 
             } else {
                 console.warn(`[News Worker] ⚠️ Fallo IA Texto. Saltando.`);
@@ -611,6 +635,15 @@ exports.createManualArticle = async (req, res) => {
         
         if (!iaData) return res.status(500).json({ error: "Error IA Texto: No se pudo generar." });
 
+        const esOnce = isOnceNews({
+            titulo: iaData.tituloViral,
+            title: titulo,
+            descripcion: 'Noticia Manual',
+            articuloGenerado: iaData.articuloGenerado,
+            enlaceOriginal,
+            url: enlaceOriginal
+        });
+
         const newArticle = new Article({
             titulo: iaData.tituloViral, 
             descripcion: 'Noticia Manual',
@@ -621,13 +654,17 @@ exports.createManualArticle = async (req, res) => {
             categoria: iaData.categoria,
             pais: 'general',
             telegramPosted: false,
-            videoProcessingStatus: 'pending'
+            videoProcessingStatus: esOnce ? 'skipped_once' : 'pending'
         });
 
         await newArticle.save();
         
-        // Enviamos al bot
-        _triggerVideoBotWithRotation(newArticle);
+        if (esOnce) {
+            console.log(`[Manual] 🚫 ONCE: se guarda en la web, no se genera JSON ni se envía a YouTube.`);
+        } else {
+            // Enviamos al bot
+            _triggerVideoBotWithRotation(newArticle);
+        }
         
         res.status(201).json(newArticle);
     } catch (error) { 

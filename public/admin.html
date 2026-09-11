@@ -176,6 +176,7 @@
         .st-processing { background: rgba(59,130,246,0.1); color: var(--primary); border: 1px solid rgba(59,130,246,0.2); }
         .st-complete { background: rgba(16,185,129,0.1); color: var(--accent); border: 1px solid rgba(16,185,129,0.2); }
         .st-failed { background: rgba(239,68,68,0.1); color: var(--danger); border: 1px solid rgba(239,68,68,0.2); }
+        .st-skipped { background: rgba(148,163,184,0.12); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.25); }
 
         /* --- CONSOLA SYSLOG --- */
         .console-wrapper { background: #020617; border-radius: 12px; border: 1px solid var(--border-color); overflow: hidden; }
@@ -339,6 +340,14 @@
                             <button id="switch-intros" class="btn btn-secondary btn-full" onclick="toggleIntros()">
                                 <i class="fa-solid fa-arrows-rotate fa-spin"></i> Consultando Estado...
                             </button>
+                            <div style="margin-top: 20px; padding: 14px 16px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25); border-radius: 10px;">
+                                <p style="color: #fbbf24; font-weight: 700; font-size: 0.85rem; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-ban"></i> Filtro ONCE (YouTube)
+                                </p>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.45;">
+                                    Las noticias de la Organización Nacional de Ciegos Españoles (sorteos, Triplex, Cuponazo, Super Once, etc.) se publican en la web, pero <strong style="color:#fff;">no se genera JSON ni se envían a los bots de YouTube</strong> (largos ni Shorts). En Live Database aparecen como <strong style="color:#fff;">NO YOUTUBE (ONCE)</strong>.
+                                </p>
+                            </div>
                         </div>
 
                         <!-- Mini Consola Syslog -->
@@ -892,6 +901,10 @@
                     if (statusText === 'complete') statusClass = "st-complete";
                     if (statusText === 'failed') statusClass = "st-failed";
                     if (statusText === 'rejected_policy') statusClass = "st-failed";
+                    if (statusText === 'skipped_once') {
+                        statusClass = "st-skipped";
+                        statusText = "NO YOUTUBE (ONCE)";
+                    }
 
                     const tgText = art.telegramPosted ? '<i class="fa-solid fa-paper-plane"></i> ENVIADO' : '<i class="fa-solid fa-clock"></i> COLA';
                     const tgColor = art.telegramPosted ? 'color: var(--accent);' : 'color: var(--warning);';
