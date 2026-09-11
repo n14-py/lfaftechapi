@@ -7,7 +7,9 @@ const Ad = require('../models/ad'); // IMPORTAMOS EL MODELO DE ANUNCIOS
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
-const { generateShortArticleContent, generateShortVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');// ============================================================================
+const { generateShortArticleContent, generateShortVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
+const { isOnceNews } = require('../utils/onceFilter');
+// ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
 const SHORT_BOT_URLS = [
@@ -274,6 +276,14 @@ exports.runShortsAPIFetch = runShortsAPIFetch;
 // ============================================================================
 
 async function _triggerShortBotWithRotation(article) {
+    if (isOnceNews(article)) {
+        console.log(`[ShortBot] 🚫 ONCE detectado. No se genera JSON ni se envía a YouTube Shorts: ${article.titulo || article.title}`);
+        if (article._id) {
+            await Article.updateOne({ _id: article._id }, { $set: { videoProcessingStatus: 'skipped_once' } });
+        }
+        return;
+    }
+
     if (SHORT_BOT_URLS.length === 0) {
         console.warn(`[ShortBot] ❌ ERROR: No hay URLs de bots configuradas para Shorts.`);
         return;
@@ -400,6 +410,7 @@ async function _triggerShortBotWithRotation(article) {
 // 🎧 MICROSERVICIO: PEDIR AUDIO A PYTHON PARA SHORTS
 // ============================================================================
 async function _triggerAudioBot(article) {
+    if (isOnceNews(article)) return;
     if (SHORT_BOT_URLS.length === 0) return;
     
     // Usamos el mismo bot rotativo o el primero
@@ -517,6 +528,16 @@ async function _runShortsWorker() {
                 const textoParaResumir = `Título: ${articleToProcess.title}\nDescripción: ${articleToProcess.description}`;
                 const resumenIA = await generateSummaryWithGemini(textoParaResumir);
 
+                const esOnce = isOnceNews({
+                    titulo: resultadoIA.tituloViral || articleToProcess.title,
+                    title: articleToProcess.title,
+                    descripcion: articleToProcess.description,
+                    articuloGenerado: resultadoIA.articuloGenerado,
+                    enlaceOriginal: articleToProcess.url,
+                    url: articleToProcess.url,
+                    fuente: articleToProcess.source && articleToProcess.source.name
+                });
+
                 const newArticle = new Article({
                     titulo: resultadoIA.tituloViral || articleToProcess.title, // Título limpio
                     descripcion: articleToProcess.description,
@@ -531,15 +552,19 @@ async function _runShortsWorker() {
                     imageText: resultadoIA.textoImagen, 
                     aiSummary: resumenIA, // <--- GUARDAMOS EL RESUMEN AQUÍ
                     telegramPosted: false,
-                    videoProcessingStatus: 'pending_short'
+                    videoProcessingStatus: esOnce ? 'skipped_once' : 'pending_short'
                 });
                 
                 await newArticle.save();
                 console.log(`[Shorts Worker] 💾 Short Guardado en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
-                // 5. INTENTO INMEDIATO DE VIDEO Y AUDIO
-                _triggerAudioBot(newArticle);
-                await _triggerShortBotWithRotation(newArticle);
+                if (esOnce) {
+                    console.log(`[Shorts Worker] 🚫 ONCE: se publica en la web, no se genera JSON ni se envía a YouTube Shorts. Pasando a otra noticia.`);
+                } else {
+                    // 5. INTENTO INMEDIATO DE VIDEO Y AUDIO
+                    _triggerAudioBot(newArticle);
+                    await _triggerShortBotWithRotation(newArticle);
+                }
                 
             } else {
                 console.warn(`[Shorts Worker] ⚠️ Fallo IA Shorts. Saltando.`);
@@ -596,6 +621,15 @@ exports.createManualShortArticle = async (req, res) => {
         console.log(`[Manual Shorts] 🤖 Generando resumen instantáneo...`);
         const resumenIA = await generateSummaryWithGemini(iaData.articuloGenerado);
 
+        const esOnce = isOnceNews({
+            titulo: iaData.tituloViral,
+            title: titulo,
+            descripcion: 'Noticia Manual',
+            articuloGenerado: iaData.articuloGenerado,
+            enlaceOriginal,
+            url: enlaceOriginal
+        });
+
         const newArticle = new Article({
             titulo: "[Short] " + iaData.tituloViral, 
             descripcion: 'Noticia Manual',
@@ -608,14 +642,18 @@ exports.createManualShortArticle = async (req, res) => {
             categoria: 'Shorts',
             pais: 'general',
             telegramPosted: false,
-            videoProcessingStatus: 'pending_short'
+            videoProcessingStatus: esOnce ? 'skipped_once' : 'pending_short'
         });
 
         await newArticle.save();
         
-        // --- NUEVO: Llamar al bot de audio además del de video ---
-        _triggerAudioBot(newArticle);
-        _triggerShortBotWithRotation(newArticle);
+        if (esOnce) {
+            console.log(`[Manual Shorts] 🚫 ONCE: se guarda en la web, no se genera JSON ni se envía a YouTube Shorts.`);
+        } else {
+            // --- NUEVO: Llamar al bot de audio además del de video ---
+            _triggerAudioBot(newArticle);
+            _triggerShortBotWithRotation(newArticle);
+        }
         
         res.status(201).json(newArticle);
     } catch (error) { 
