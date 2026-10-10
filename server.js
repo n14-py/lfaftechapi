@@ -17,6 +17,7 @@ const apiRoutes = require('./routes/index');
 const syncController = require('./controllers/syncController');
 const syncShortsController = require('./controllers/syncShortsController');
 const pushScheduler = require('./utils/pushScheduler'); // <-- NUESTRO NUEVO RELOJ
+const liveController = require('./controllers/liveController');
 
 
 const app = express();
@@ -87,6 +88,7 @@ mongoose.connect(process.env.MONGODB_URI)
      
       syncShortsController.startShortsWorker();
       pushScheduler.iniciarMotorPush();
+      liveController.startDispatcher();
       console.log("🤖 Worker Maestro iniciado (Modo: Bajo Demanda + Anti-Zombies)");
       
   })

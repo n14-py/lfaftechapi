@@ -155,6 +155,33 @@
         .btn-warning { background: var(--warning); color: #000; }
         .btn-secondary { background: var(--bg-input); color: white; border: 1px solid var(--border-color); }
         .btn-secondary:hover { background: #334155; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-sm { padding: 8px 12px; font-size: 0.8rem; border-radius: 8px; }
+
+        .country-grid, .channel-grid { display: grid; gap: 10px; }
+        .country-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+        .channel-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px; }
+        .country-chip, .channel-card {
+            background: var(--bg-input); border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 12px 14px;
+        }
+        .country-chip { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .country-chip.on { border-color: var(--primary); background: rgba(59, 130, 246, 0.08); }
+        .country-chip input, .channel-card input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); }
+        .chip-meta { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
+        .chip-meta.low { color: var(--warning); }
+        .chip-meta.ok { color: var(--accent); }
+        .live-total {
+            display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+            background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.35);
+            border-radius: 12px; padding: 14px 16px; margin: 8px 0 18px;
+        }
+        .live-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+        .json-box {
+            background: #020617; border: 1px solid var(--border-color); border-radius: 12px;
+            padding: 14px; max-height: 320px; overflow: auto; font-family: Consolas, monospace;
+            font-size: 0.78rem; color: #93c5fd; white-space: pre-wrap; word-break: break-word;
+        }
 
         /* --- TABS --- */
         .tabs { display: flex; gap: 5px; margin-bottom: 25px; border-bottom: 2px solid var(--border-color); }
@@ -252,6 +279,9 @@
                 <div class="nav-section" style="margin-top: 15px;">Orquestación & IA</div>
                 <a class="nav-item" onclick="navigate('workers', this)">
                     <i class="fa-solid fa-robot"></i> Control de Workers
+                </a>
+                <a class="nav-item" onclick="navigate('directos', this); refreshLivePanel();">
+                    <i class="fa-solid fa-tower-broadcast"></i> Programa en vivo
                 </a>
                 <a class="nav-item" onclick="navigate('manual', this)">
                     <i class="fa-solid fa-pen-nib"></i> Inyección Editorial
@@ -402,6 +432,128 @@
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- 2b. PROGRAMA EN VIVO                           -->
+                <!-- ============================================== -->
+                <section id="directos" class="section-container">
+                    <div class="card-header" style="margin-bottom: 25px; border:none; padding:0;">
+                        <div>
+                            <h2 style="font-size: 1.8rem; font-weight: 800;">Programa en vivo</h2>
+                            <p style="color: var(--text-muted); margin-top: 5px;">Marcá los países, definí cuántos directos hace cada canal y el API arma el JSON para el motor de Noticias.lat en vivo.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-4" id="live-metrics">
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fa-solid fa-earth-americas"></i></div>
+                            <div class="metric-data"><h4>Países marcados</h4><h2 id="live-metric-paises">0</h2></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon" style="background: rgba(16,185,129,0.1); color: var(--accent);"><i class="fa-solid fa-tower-broadcast"></i></div>
+                            <div class="metric-data"><h4>Directos de la tanda</h4><h2 id="live-metric-total">0</h2></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon" style="background: rgba(245,158,11,0.1); color: var(--warning);"><i class="fa-solid fa-list-ol"></i></div>
+                            <div class="metric-data"><h4>En cola</h4><h2 id="live-metric-cola">0</h2></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon" style="background: rgba(239,68,68,0.1); color: var(--danger);"><i class="fa-solid fa-signal"></i></div>
+                            <div class="metric-data"><h4>Motor</h4><h2 id="live-metric-motor" style="font-size: 1.1rem;">…</h2></div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-flag"></i> Países de los directos</h3>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn btn-secondary btn-sm" onclick="marcarPaises(true)">Marcar todos</button>
+                                <button class="btn btn-secondary btn-sm" onclick="marcarPaises(false)">Limpiar</button>
+                            </div>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin: -10px 0 14px;">Elegí de la lista. Por ejemplo, 10 países. El número de cada uno son videos largos listos (con mp4) en los últimos días.</p>
+                        <div id="live-paises" class="country-grid"></div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">
+                            <h3><i class="fa-brands fa-youtube"></i> Canales</h3>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin: -10px 0 14px;">Hay 4 canales. Cada uno que dejes activo tiene que tener al menos 1 directo. Si ponés 3 en cada uno, la tanda queda en 12.</p>
+                        <div id="live-canales" class="channel-grid"></div>
+                        <div class="live-total">
+                            <div>
+                                <strong id="live-total-label">0 directos en esta tanda</strong>
+                                <div style="color: var(--text-muted); font-size: 0.82rem; margin-top: 4px;" id="live-total-detalle">Marcá países y canales para ver el total.</div>
+                            </div>
+                            <label class="checkbox-item" style="margin:0;">
+                                <input type="checkbox" id="live-enabled" onchange="recalcLiveTotal()"> Programa activo
+                            </label>
+                            <label class="checkbox-item" style="margin:0;">
+                                <input type="checkbox" id="live-auto" checked onchange="recalcLiveTotal()"> Enviar el siguiente solo cuando termina el anterior
+                            </label>
+                        </div>
+                        <div class="grid-2" style="margin-bottom: 0;">
+                            <div class="form-group">
+                                <label>URL del motor (noticiaslatenvivo)</label>
+                                <input type="text" id="live-url" placeholder="https://tu-motor:3002">
+                            </div>
+                            <div class="form-group">
+                                <label>Días hacia atrás para buscar notas</label>
+                                <input type="number" id="live-days" min="1" max="21" value="5">
+                            </div>
+                        </div>
+                        <div class="grid-2" style="margin-bottom: 0;">
+                            <div class="form-group">
+                                <label>Mínimo de notas por directo</label>
+                                <input type="number" id="live-min" min="4" max="15" value="8">
+                            </div>
+                            <div class="form-group">
+                                <label>Máximo de notas por directo</label>
+                                <input type="number" id="live-max" min="8" max="20" value="15">
+                            </div>
+                        </div>
+                        <div class="live-actions">
+                            <button class="btn btn-primary" onclick="saveLiveProgram()"><i class="fa-solid fa-floppy-disk"></i> Guardar programa</button>
+                            <button class="btn btn-success" onclick="buildLiveTanda()"><i class="fa-solid fa-clapperboard"></i> Armar tanda y generar JSON</button>
+                            <button class="btn btn-warning" style="color:#000;" onclick="dispatchLive()"><i class="fa-solid fa-play"></i> Mandar el siguiente directo</button>
+                            <button class="btn btn-danger" onclick="stopLive()"><i class="fa-solid fa-stop"></i> Cortar el directo actual</button>
+                        </div>
+                        <div id="live-avisos" style="margin-top: 16px;"></div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-list"></i> Cola y directos</h3>
+                            <span id="live-en-aire" style="color: var(--text-muted); font-size: 0.85rem;">Nada al aire</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Canal</th>
+                                        <th>País</th>
+                                        <th>Estado</th>
+                                        <th>Notas</th>
+                                        <th>YouTube</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="live-jobs-body">
+                                    <tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Todavía no hay tanda.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-code"></i> JSON / respuesta del motor</h3>
+                            <button class="btn btn-secondary btn-sm" onclick="copyLiveJson()">Copiar</button>
+                        </div>
+                        <pre id="live-json" class="json-box">Acá aparece el JSON que se manda a /live/start, o la vista previa que devuelve el motor.</pre>
                     </div>
                 </section>
 
@@ -687,8 +839,13 @@
         function initCore() {
             checkIntrosStatus();
             fetchLiveArticles();
+            refreshLivePanel(true);
             logConsole("Conexión segura establecida. Subsistemas en línea.", "success");
             setInterval(fetchLiveArticles, 30000); // Live DB cada 30s
+            setInterval(() => {
+                const sec = document.getElementById('directos');
+                if (sec && sec.classList.contains('active')) refreshLivePanel(true);
+            }, 15000);
         }
 
         // ==========================================
@@ -882,6 +1039,305 @@
         // ==========================================
         // MONGO DB MONITOR
         // ==========================================
+        // ==========================================
+        // PROGRAMA EN VIVO
+        // ==========================================
+        let liveCatalogo = null;
+        let liveFormReady = false;
+
+        function liveStatusBadge(status) {
+            const map = {
+                queued: ['st-pending', 'EN COLA'],
+                sending: ['st-processing', 'ENVIANDO'],
+                accepted: ['st-processing', 'PREPARANDO'],
+                live: ['st-complete', 'AL AIRE'],
+                complete: ['st-complete', 'TERMINÓ'],
+                failed: ['st-failed', 'FALLÓ'],
+                cancelled: ['st-skipped', 'CANCELADO'],
+                stopping: ['st-pending', 'CORTANDO']
+            };
+            const item = map[status] || ['st-pending', escapeHTML(status || '')];
+            return `<span class="status-badge ${item[0]}">${item[1]}</span>`;
+        }
+
+        function collectLiveConfig() {
+            const paises = [];
+            document.querySelectorAll('#live-paises input[type="checkbox"]:checked').forEach((input) => paises.push(input.value));
+            const canales = [];
+            document.querySelectorAll('#live-canales .channel-card').forEach((card) => {
+                const activo = card.querySelector('.live-canal-on').checked;
+                let directos = parseInt(card.querySelector('.live-canal-n').value, 10);
+                if (!Number.isFinite(directos) || directos < 1) directos = 1;
+                if (directos > 8) directos = 8;
+                card.querySelector('.live-canal-n').value = String(directos);
+                canales.push({
+                    id: Number(card.dataset.id),
+                    activo,
+                    directosPorTanda: directos
+                });
+            });
+            return {
+                enabled: document.getElementById('live-enabled').checked,
+                autoDispatch: document.getElementById('live-auto').checked,
+                liveServiceUrl: document.getElementById('live-url').value.trim(),
+                lookbackDays: Number(document.getElementById('live-days').value) || 5,
+                minVideos: Number(document.getElementById('live-min').value) || 8,
+                maxVideos: Number(document.getElementById('live-max').value) || 15,
+                paises,
+                canales
+            };
+        }
+
+        function recalcLiveTotal() {
+            if (!liveFormReady && !document.querySelector('#live-canales .channel-card')) return;
+            const config = collectLiveConfig();
+            const activos = config.canales.filter((canal) => canal.activo);
+            const total = activos.reduce((sum, canal) => sum + canal.directosPorTanda, 0);
+            document.getElementById('live-metric-paises').textContent = String(config.paises.length);
+            document.getElementById('live-metric-total').textContent = String(total);
+            document.getElementById('live-total-label').textContent = `${total} directo${total === 1 ? '' : 's'} en esta tanda`;
+            document.getElementById('live-total-detalle').textContent = `${config.paises.length} países marcados · ${activos.length} canales activos. Mínimo 1 directo por canal activo.`;
+            document.querySelectorAll('#live-paises .country-chip').forEach((chip) => {
+                const input = chip.querySelector('input');
+                chip.classList.toggle('on', Boolean(input && input.checked));
+            });
+        }
+
+        function renderLiveForm(data) {
+            liveCatalogo = data.catalogo;
+            const selected = new Set((data.config && data.config.paises) || []);
+            const counts = {};
+            (data.inventario || []).forEach((item) => { counts[item.code] = item; });
+            const paisesBox = document.getElementById('live-paises');
+            paisesBox.innerHTML = (data.catalogo.paises || []).map((pais) => {
+                const info = counts[pais.code] || { listos: 0, sinMp4: 0 };
+                const on = selected.has(pais.code);
+                const low = info.listos < ((data.config && data.config.minVideos) || 8);
+                return `<label class="country-chip ${on ? 'on' : ''}">
+                    <input type="checkbox" value="${pais.code}" ${on ? 'checked' : ''} onchange="recalcLiveTotal()">
+                    <span><strong>${escapeHTML(pais.nombre)}</strong><br><span style="color:var(--text-muted); font-size:0.72rem;">${pais.code.toUpperCase()}</span></span>
+                    <span class="chip-meta ${low ? 'low' : 'ok'}" data-code="${pais.code}">${info.listos} listos</span>
+                </label>`;
+            }).join('');
+
+            const canalesGuardados = (data.config && data.config.canales) || [];
+            document.getElementById('live-canales').innerHTML = (data.catalogo.canales || []).map((canal) => {
+                const saved = canalesGuardados.find((item) => Number(item.id) === canal.id) || { activo: true, directosPorTanda: 1 };
+                return `<div class="channel-card" data-id="${canal.id}">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <strong>${escapeHTML(canal.nombre)}</strong>
+                        <span style="color:var(--text-muted); font-size:0.75rem;">token_${canal.id}</span>
+                    </div>
+                    <label class="checkbox-item" style="margin-bottom:10px;">
+                        <input class="live-canal-on" type="checkbox" ${saved.activo ? 'checked' : ''} onchange="recalcLiveTotal()"> Canal activo
+                    </label>
+                    <label style="display:block; font-size:0.8rem; color:#cbd5e1; margin-bottom:6px;">Directos en esta tanda</label>
+                    <input class="live-canal-n" type="number" min="1" max="8" value="${saved.directosPorTanda || 1}" onchange="recalcLiveTotal()">
+                </div>`;
+            }).join('');
+
+            document.getElementById('live-enabled').checked = Boolean(data.config && data.config.enabled);
+            document.getElementById('live-auto').checked = !data.config || data.config.autoDispatch !== false;
+            document.getElementById('live-url').value = (data.config && (data.config.liveServiceUrl || data.config.liveServiceUrlEfectiva)) || '';
+            document.getElementById('live-days').value = (data.config && data.config.lookbackDays) || 5;
+            document.getElementById('live-min').value = (data.config && data.config.minVideos) || 8;
+            document.getElementById('live-max').value = (data.config && data.config.maxVideos) || 15;
+            liveFormReady = true;
+            recalcLiveTotal();
+        }
+
+        function updateLiveCounts(inventario, minVideos) {
+            const counts = {};
+            (inventario || []).forEach((item) => { counts[item.code] = item; });
+            document.querySelectorAll('#live-paises .chip-meta').forEach((el) => {
+                const info = counts[el.dataset.code] || { listos: 0 };
+                el.textContent = `${info.listos} listos`;
+                el.classList.toggle('low', info.listos < (minVideos || 8));
+                el.classList.toggle('ok', info.listos >= (minVideos || 8));
+            });
+        }
+
+        function renderLiveJobs(data) {
+            document.getElementById('live-metric-cola').textContent = String(data.cola || 0);
+            const motor = document.getElementById('live-metric-motor');
+            if (data.servicio && data.servicio.ok) {
+                motor.textContent = 'EN LÍNEA';
+                motor.style.color = 'var(--accent)';
+            } else {
+                motor.textContent = 'SIN MOTOR';
+                motor.style.color = 'var(--warning)';
+            }
+            const aire = document.getElementById('live-en-aire');
+            if (data.enAire) {
+                aire.innerHTML = `<span class="status-badge st-complete">AL AIRE</span> ${escapeHTML(data.enAire.paisNombre)} · ${escapeHTML(data.enAire.canalNombre)}`;
+            } else if (data.servicio && data.servicio.detalle) {
+                aire.textContent = data.servicio.detalle;
+            } else {
+                aire.textContent = 'Nada al aire';
+            }
+
+            const tbody = document.getElementById('live-jobs-body');
+            const jobs = data.jobs || [];
+            if (!jobs.length) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Todavía no hay tanda.</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = jobs.map((job) => {
+                const yt = job.watchUrl
+                    ? `<a href="${escapeHTML(job.watchUrl)}" target="_blank" style="color:#ef4444; text-decoration:none;"><i class="fa-brands fa-youtube"></i></a>`
+                    : '<span style="color:var(--text-muted)">—</span>';
+                const error = job.error ? `<div style="color:var(--danger); font-size:0.75rem; margin-top:4px;">${escapeHTML(job.error)}</div>` : '';
+                return `<tr>
+                    <td>${escapeHTML(job.canalNombre)}<div style="color:var(--text-muted); font-size:0.72rem;">cuenta ${job.canalId}</div></td>
+                    <td>${escapeHTML(job.paisNombre || job.pais)}</td>
+                    <td>${liveStatusBadge(job.status)}${error}</td>
+                    <td>${job.videoCount || 0}${job.reused ? ' <span style="color:var(--warning); font-size:0.72rem;">repite</span>' : ''}</td>
+                    <td>${yt}</td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn btn-secondary btn-sm" onclick="showLiveJson('${job.id}')">JSON</button>
+                        <button class="btn btn-secondary btn-sm" onclick="previewLive('${job.id}')">Probar</button>
+                        ${job.status === 'queued' ? `<button class="btn btn-secondary btn-sm" onclick="cancelLive('${job.id}')">Quitar</button>` : ''}
+                        ${job.status === 'failed' || job.status === 'complete' || job.status === 'cancelled' ? `<button class="btn btn-secondary btn-sm" onclick="retryLive('${job.id}')">Repetir</button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function showLiveAvisos(avisos) {
+            const box = document.getElementById('live-avisos');
+            if (!avisos || !avisos.length) { box.innerHTML = ''; return; }
+            box.innerHTML = avisos.map((aviso) => `<div class="log-entry log-warn" style="margin-bottom:6px;">${escapeHTML(aviso.motivo)}</div>`).join('');
+        }
+
+        async function refreshLivePanel(silent) {
+            try {
+                const res = await axios.get('/api/lives/admin/panel', { headers: authHeaders });
+                if (!liveFormReady) renderLiveForm(res.data);
+                else updateLiveCounts(res.data.inventario, res.data.config && res.data.config.minVideos);
+                renderLiveJobs(res.data);
+                if (!silent) logConsole('Panel de directos actualizado.', 'success');
+            } catch (err) {
+                if (!silent) {
+                    const msg = err.response?.data?.error || err.message;
+                    showToast('Directos', msg, 'error');
+                }
+            }
+        }
+
+        function marcarPaises(on) {
+            document.querySelectorAll('#live-paises input[type="checkbox"]').forEach((input) => { input.checked = on; });
+            recalcLiveTotal();
+        }
+
+        async function saveLiveProgram(quiet) {
+            const silencioso = quiet === true;
+            const payload = collectLiveConfig();
+            try {
+                const res = await axios.put('/api/lives/admin/config', payload, { headers: authHeaders });
+                if (!silencioso) showToast('Programa guardado', `${res.data.config.paises.length} países, ${res.data.config.totalDirectos} directos por tanda.`, 'success');
+                logConsole(`Programa en vivo guardado: ${res.data.config.totalDirectos} directos.`, 'success');
+                liveFormReady = false;
+                await refreshLivePanel(true);
+                return true;
+            } catch (err) {
+                const msg = err.response?.data?.error || err.message;
+                showToast('No se guardó', msg, 'error');
+                logConsole(`Programa en vivo: ${msg}`, 'error');
+                return false;
+            }
+        }
+
+        async function buildLiveTanda() {
+            try {
+                const guardado = await saveLiveProgram(true);
+                if (!guardado) return;
+                const res = await axios.post('/api/lives/admin/tanda', {}, { headers: authHeaders });
+                showLiveAvisos(res.data.avisos);
+                const primero = (res.data.jobs && res.data.jobs[0]) || null;
+                if (primero) await showLiveJson(primero.id);
+                showToast('Tanda lista', `${res.data.total} directos en cola (pedidos: ${res.data.programado}).`, res.data.total ? 'success' : 'info');
+                logConsole(`Tanda de directos: ${res.data.total} JSON generados.`, 'success');
+                await refreshLivePanel(true);
+            } catch (err) {
+                const msg = err.response?.data?.error || err.message;
+                showToast('No armé la tanda', msg, 'error');
+            }
+        }
+
+        async function dispatchLive() {
+            try {
+                const res = await axios.post('/api/lives/admin/dispatch', {}, { headers: authHeaders });
+                if (res.data.ok) showToast('Enviado', 'El motor aceptó el directo y lo está armando.', 'success');
+                else showToast('Cola', res.data.error || 'El motor no lo tomó todavía.', 'info');
+                logConsole(res.data.error || 'Directo enviado al motor.', res.data.ok ? 'success' : 'warn');
+                await refreshLivePanel(true);
+            } catch (err) {
+                const msg = err.response?.data?.error || err.message;
+                showToast('No salió', msg, 'error');
+                logConsole(`Dispatch: ${msg}`, 'error');
+            }
+        }
+
+        async function stopLive() {
+            try {
+                await axios.post('/api/lives/admin/stop', {}, { headers: authHeaders });
+                showToast('Corte pedido', 'Le avisé al motor que cierre el directo.', 'info');
+                await refreshLivePanel(true);
+            } catch (err) {
+                showToast('No corté', err.response?.data?.error || err.message, 'error');
+            }
+        }
+
+        async function showLiveJson(id) {
+            try {
+                const res = await axios.get(`/api/lives/admin/jobs/${id}`, { headers: authHeaders });
+                document.getElementById('live-json').textContent = JSON.stringify(res.data.payload, null, 2);
+            } catch (err) {
+                showToast('JSON', err.response?.data?.error || err.message, 'error');
+            }
+        }
+
+        async function previewLive(id) {
+            try {
+                showToast('Probando', 'Le estoy pidiendo la vista previa al motor…', 'info');
+                const res = await axios.post('/api/lives/admin/preview', { jobId: id }, { headers: authHeaders });
+                document.getElementById('live-json').textContent = JSON.stringify({ payload: res.data.payload, preview: res.data.preview }, null, 2);
+                const titulo = res.data.preview && res.data.preview.youtube_title;
+                showToast('El motor respondió', titulo || 'Vista previa lista.', 'success');
+                logConsole(`Vista previa del directo: ${titulo || 'ok'}`, 'success');
+            } catch (err) {
+                const data = err.response?.data;
+                if (data && data.payload) document.getElementById('live-json').textContent = JSON.stringify(data, null, 2);
+                showToast('El motor no contestó', (data && data.error) || err.message, 'error');
+            }
+        }
+
+        async function cancelLive(id) {
+            try {
+                await axios.post(`/api/lives/admin/jobs/${id}/cancel`, {}, { headers: authHeaders });
+                await refreshLivePanel(true);
+            } catch (err) {
+                showToast('No se quitó', err.response?.data?.error || err.message, 'error');
+            }
+        }
+
+        async function retryLive(id) {
+            try {
+                await axios.post(`/api/lives/admin/jobs/${id}/retry`, {}, { headers: authHeaders });
+                showToast('De nuevo en la cola', 'Quedó primero para el próximo envío.', 'success');
+                await refreshLivePanel(true);
+            } catch (err) {
+                showToast('No reencolé', err.response?.data?.error || err.message, 'error');
+            }
+        }
+
+        function copyLiveJson() {
+            const text = document.getElementById('live-json').textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => showToast('Copiado', 'JSON en el portapapeles.', 'success'));
+            }
+        }
+
         async function fetchLiveArticles() {
             const tbody = document.getElementById('articles-table-body');
             try {

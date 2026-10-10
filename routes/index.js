@@ -10,6 +10,7 @@ const memberRoutes = require('./member');
 const alexaController = require('../controllers/alexaController');
 
 const adRoutes = require('./ads'); // <-- NUEVO: Importamos las rutas de anuncios
+const liveRoutes = require('./lives');
 
 // --- 1. Importar Rutas de Sitemap ---
 const sitemapRoutes = require('./sitemap');
@@ -20,6 +21,7 @@ router.use(gameRoutes);
 router.use('/relax', radioRelaxRoutes);
 router.use('/member', memberRoutes);
 router.use('/ads', adRoutes); // <-- NUEVO: Conectamos la ruta con el prefijo /api/ads
+router.use('/lives', liveRoutes);
 // Ruta para Alexa
 router.get('/alexa-stats', alexaController.getStatsForAlexa);
 
