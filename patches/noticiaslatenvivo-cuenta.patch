@@ -1,0 +1,196 @@
+diff --git a/config.py b/config.py
+index 7a178d6..6f02e0c 100644
+--- a/config.py
++++ b/config.py
+@@ -171,6 +171,27 @@ PORT = int(os.getenv("PORT", "3002"))
+ CANAL_DEFAULT = os.getenv("CANAL_NOMBRE", "Noticias LAT")
+ LIVE_PRIVACY = os.getenv("LIVE_PRIVACY", "public")
+ MAX_ACCOUNTS = int(os.getenv("YOUTUBE_MAX_ACCOUNTS", "6"))
++
++
++def requested_account(payload, max_accounts=None):
++    """Cuenta de YouTube pedida por lfaftechapi. None si hay que rotar."""
++    if not isinstance(payload, dict):
++        return None
++    limite = MAX_ACCOUNTS if max_accounts is None else max_accounts
++    for key in ("cuenta", "account_index", "canal_id"):
++        if key not in payload:
++            continue
++        raw = payload.get(key)
++        if raw is None or raw == "":
++            continue
++        try:
++            account = int(raw)
++        except (TypeError, ValueError):
++            return None
++        if 0 <= account < limite:
++            return account
++        raise ValueError(f"La cuenta {account} no existe. Las cuentas van de 0 a {limite - 1}.")
++    return None
+ AD_CUEPOINT_SECONDS = int(os.getenv("AD_CUEPOINT_SECONDS", "30"))
+ AD_MIN_GAP_SECONDS = int(os.getenv("AD_MIN_GAP_SECONDS", "120"))
+ AD_REPEAT_SECONDS = int(os.getenv("AD_REPEAT_SECONDS", "600"))
+diff --git a/docs/contrato-lfaftechapi.md b/docs/contrato-lfaftechapi.md
+index d8e4801..14cf301 100644
+--- a/docs/contrato-lfaftechapi.md
++++ b/docs/contrato-lfaftechapi.md
+@@ -36,6 +36,21 @@ El motor agrupa solo: los primeros 3 de política, después economía, después
+ 
+ `video_url` también acepta `videoUrl` o `url`. `categoria` acepta `category`.
+ 
++### Canal
++
++Hay 4 cuentas (`token_0.json` … `token_3.json`):
++
++| `cuenta` | Canal |
++| --- | --- |
++| 0 | Noticias Lat |
++| 1 | Noticias Lat Última Hora |
++| 2 | Noticias Lat Ahora |
++| 3 | Noticias Lat Hoy |
++
++`canal` es el nombre que dice el presentador. `cuenta` (también `canal_id`) elige el token. Si viene, el directo sale solo en esa cuenta: si el token falla, no se pasa a otra. Si no viene, se rota como antes.
++
++El aviso de vuelta incluye `cuenta` y `canal`.
++
+ ### Bloques ya armados
+ 
+ Si lfaftechapi prefiere mandar los grupos, se respeta ese orden y entre cada grupo entra el presentador.
+diff --git a/live_orchestrator.py b/live_orchestrator.py
+index 841123a..a31bcdd 100644
+--- a/live_orchestrator.py
++++ b/live_orchestrator.py
+@@ -26,6 +26,7 @@ from config import (
+     ADMIN_API_KEY,
+     CANAL_DEFAULT,
+     COUNTRIES,
++    requested_account,
+     COUNTRY_NAME_TO_CODE,
+     FONT_PATH,
+     LOCKS_DIR,
+@@ -305,6 +306,7 @@ def run_live(payload, rng):
+ 
+     try:
+         logger.info("========== DIRECTO %s | %s ==========", live_id, show["meta"]["pais_nombre"])
++        account_index = requested_account(payload)
+         downloaded = _download_blocks(show["rundown"]["blocks"], workdir)
+         if not downloaded:
+             raise RuntimeError("No se pudo descargar ninguna nota.")
+@@ -336,6 +338,7 @@ def run_live(payload, rng):
+             title=show["package"]["youtube_title"],
+             description=show["package"]["youtube_description"],
+             privacy=show["privacy"] or "public",
++            account_index=account_index,
+         )
+         session.set_thumbnail(thumb)
+         try:
+@@ -412,9 +415,20 @@ def run_live(payload, rng):
+             session.complete()
+         elif session:
+             session.abandon()
++        cuenta_aviso = session.account_index if session else None
++        if cuenta_aviso is None:
++            crudo = payload.get("cuenta", payload.get("canal_id"))
++            if crudo not in (None, ""):
++                try:
++                    cuenta_aviso = int(crudo)
++                except (TypeError, ValueError):
++                    cuenta_aviso = None
+         _webhook("live_failed", {
+             "liveId": live_id,
+             "pais": show["meta"]["pais_codigo"],
++            "paisNombre": show["meta"]["pais_nombre"],
++            "canal": show["meta"]["canal"],
++            "cuenta": cuenta_aviso,
+             "error": str(exc),
+             "status": "failed",
+         })
+@@ -439,6 +453,8 @@ def _event_payload(show, session, status):
+         "presenter": show["package"]["anchor"]["name"],
+         "scriptSource": show["package"]["source"],
+         "status": status,
++        "cuenta": session.account_index,
++        "canal": show["meta"]["canal"],
+         "articleIds": [
+             video["article_id"]
+             for block in show["rundown"]["blocks"]
+diff --git a/tests/test_cuenta.py b/tests/test_cuenta.py
+new file mode 100644
+index 0000000..f88b62f
+--- /dev/null
++++ b/tests/test_cuenta.py
+@@ -0,0 +1,26 @@
++# -*- coding: utf-8 -*-
++import unittest
++
++from config import requested_account
++
++
++class CuentaTests(unittest.TestCase):
++    def test_sin_cuenta_rota(self):
++        self.assertIsNone(requested_account({}))
++        self.assertIsNone(requested_account({"cuenta": None, "canal": "Noticias Lat"}))
++
++    def test_elige_la_cuenta_del_admin(self):
++        self.assertEqual(requested_account({"cuenta": 0}), 0)
++        self.assertEqual(requested_account({"cuenta": "3"}), 3)
++        self.assertEqual(requested_account({"canal_id": 2}), 2)
++
++    def test_ignora_vacio_y_usa_el_siguiente(self):
++        self.assertEqual(requested_account({"cuenta": "", "canal_id": 1}), 1)
++
++    def test_fuera_de_rango(self):
++        with self.assertRaises(ValueError):
++            requested_account({"cuenta": 9})
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/youtube_live.py b/youtube_live.py
+index 4375464..f24971a 100644
+--- a/youtube_live.py
++++ b/youtube_live.py
+@@ -17,7 +17,7 @@ from googleapiclient.discovery import build
+ from googleapiclient.errors import HttpError
+ from googleapiclient.http import MediaFileUpload
+ 
+-from config import AD_REPEAT_SECONDS, LOCKS_DIR, MAX_ACCOUNTS, SCOPES
++from config import AD_REPEAT_SECONDS, LOCKS_DIR, MAX_ACCOUNTS, SCOPES, requested_account
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -145,8 +145,33 @@ class YouTubeLiveSession:
+         self.watch_url = None
+         self.privacy = "public"
+ 
+-    def open(self, title, description, privacy="public"):
++    def open(self, title, description, privacy="public", account_index=None):
+         self.privacy = privacy if privacy in ("public", "unlisted", "private") else "public"
++        forced = requested_account({"cuenta": account_index}) if account_index is not None else None
++        if forced is not None:
++            # El admin eligió el canal. Si esa cuenta falla, no se cuela en otra.
++            logger.info("  [YouTube] El admin pidió la cuenta %s.", forced)
++            youtube = get_authenticated_service(forced)
++            if not youtube:
++                raise YouTubeLiveError(
++                    f"La cuenta {forced} no tiene un token válido (token_{forced}.json)."
++                )
++            self.youtube = youtube
++            self.account_index = forced
++            try:
++                self._create_stream(title)
++                self._create_broadcast(title, description, with_monetization=True)
++                self._bind()
++                self.watch_url = f"https://www.youtube.com/watch?v={self.broadcast_id}"
++                logger.info(
++                    "  [YouTube] Directo creado en la cuenta pedida %s: %s (pauta=%s)",
++                    forced, self.watch_url, self.monetization_enabled,
++                )
++                return self
++            except Exception:
++                self._cleanup_partial()
++                raise
++
+         start = next_account_index()
+         last_error = None
+ 
