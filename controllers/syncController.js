@@ -7,6 +7,7 @@ const Ad = require('../models/ad');
 // Importamos el cliente Gemini Rotativo (asegurate de haber actualizado geminiClient.js)
 const { generateArticleContent, generateVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
 const { isOnceNews } = require('../utils/onceFilter');
+const { attachYoutubeCopy, applyStoredYoutubeDescription } = require('../utils/youtubeCopy');
 // ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS) 
 // ============================================================================
@@ -356,6 +357,9 @@ async function _triggerVideoBotWithRotation(article) {
             return;
         }
 
+        // Solo se reemplaza el texto de la descripción. Las escenas no cambian.
+        applyStoredYoutubeDescription(payload_escenas, articleCheck);
+
         // GUARDAMOS EL JSON EN LA BASE DE DATOS PARA FUTUROS INTENTOS
         articleCheck.escenasJSON = payload_escenas;
         
@@ -379,6 +383,8 @@ async function _triggerVideoBotWithRotation(article) {
             console.log(`[VideoBot] 🚫 Intros desactivadas desde el Admin. Se eliminó la intro de este video.`);
         }
         // -------------------------------------------------------------------
+
+        applyStoredYoutubeDescription(payload_escenas, articleCheck);
 
         let attempts = 0;
     let sent = false;
@@ -570,7 +576,8 @@ async function _runNewsWorker() {
                     telegramPosted: false,
                     videoProcessingStatus: esOnce ? 'skipped_once' : 'pending'
                 });
-                
+
+                await attachYoutubeCopy(newArticle);
                 await newArticle.save();
                 console.log(`[News Worker] 💾 Guardada en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
@@ -657,6 +664,7 @@ exports.createManualArticle = async (req, res) => {
             videoProcessingStatus: esOnce ? 'skipped_once' : 'pending'
         });
 
+        await attachYoutubeCopy(newArticle);
         await newArticle.save();
         
         if (esOnce) {

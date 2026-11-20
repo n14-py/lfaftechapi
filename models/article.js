@@ -18,7 +18,14 @@ const ArticleSchema = new mongoose.Schema({
     pais: { type: String, index: true, sparse: true },
     
     // El artículo largo generado por la IA
-    articuloGenerado: { type: String, required: true }, 
+    articuloGenerado: { type: String, required: true },
+
+    // Descripción de YouTube. No reemplaza `descripcion`: esa bajada corta
+    // sigue alimentando la web, el buscador y el sitemap.
+    descripcionyt: { type: String, default: null },
+
+    // Comentario para el video. Esta API solo lo genera y lo entrega.
+    comentarioyt: { type: String, default: null }, 
 
     // Este campo nos dirá si el bot de Telegram ya lo publicó.
     telegramPosted: { type: Boolean, default: false, index: true },

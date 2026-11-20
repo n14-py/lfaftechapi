@@ -9,6 +9,7 @@ const Ad = require('../models/ad'); // IMPORTAMOS EL MODELO DE ANUNCIOS
 // Importamos el cliente Gemini Rotativo adaptado para Shorts
 const { generateShortArticleContent, generateShortVideoScenesJSON, generateSummaryWithGemini } = require('../utils/geminiClient');
 const { isOnceNews } = require('../utils/onceFilter');
+const { attachYoutubeCopy, applyStoredYoutubeDescription } = require('../utils/youtubeCopy');
 // ============================================================================
 // ⚙️ 1. CONFIGURACIÓN DE LA FLOTA DE BOTS (VIDEO WORKERS PARA SHORTS)
 // ============================================================================
@@ -344,6 +345,9 @@ async function _triggerShortBotWithRotation(article) {
             return;
         }
 
+        // Solo se reemplaza el texto de la descripción. Las escenas no cambian.
+        applyStoredYoutubeDescription(payload_escenas, articleCheck);
+
         // GUARDAMOS EL JSON EN LA BASE DE DATOS PARA FUTUROS INTENTOS
         articleCheck.escenasJSON = payload_escenas;
 
@@ -366,6 +370,8 @@ async function _triggerShortBotWithRotation(article) {
             console.log(`[ShortsBot] 🚫 Intros desactivadas desde el Admin. Se eliminó la intro de este Short.`);
         }
         // -------------------------------------------------------------------
+
+    applyStoredYoutubeDescription(payload_escenas, articleCheck);
 
     let attempts = 0;
     let sent = false;
@@ -554,7 +560,8 @@ async function _runShortsWorker() {
                     telegramPosted: false,
                     videoProcessingStatus: esOnce ? 'skipped_once' : 'pending_short'
                 });
-                
+
+                await attachYoutubeCopy(newArticle, { esShort: true });
                 await newArticle.save();
                 console.log(`[Shorts Worker] 💾 Short Guardado en DB (Con Resumen IA): ${newArticle.titulo}`);
                 
@@ -645,6 +652,7 @@ exports.createManualShortArticle = async (req, res) => {
             videoProcessingStatus: esOnce ? 'skipped_once' : 'pending_short'
         });
 
+        await attachYoutubeCopy(newArticle, { esShort: true });
         await newArticle.save();
         
         if (esOnce) {
