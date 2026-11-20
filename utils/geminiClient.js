@@ -14,7 +14,10 @@ const RAW_KEYS = [
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEY_4,
-    process.env.GEMINI_API_KEY_5
+    process.env.GEMINI_API_KEY_5,
+    process.env.GEMINI_API_KEY_6,
+    process.env.GEMINI_API_KEY_7,
+    process.env.GEMINI_API_KEY_8
 ];
 
 // Filtramos para quitar las que estén vacías o undefined
@@ -49,11 +52,18 @@ function getModel() {
     });
 }
 
-// Función para rotar la clave si se agota la cuota
+function detalleErrorGemini(error) {
+    const texto = error && error.message ? error.message : String(error || "error desconocido");
+    return texto.replace(/key=[^&\s]+/gi, "key=***").replace(/\s+/g, " ").slice(0, 180);
+}
+
+// Pasa a la clave siguiente. El índice vuelve a la primera al terminar la lista.
 function rotateKey() {
-    if (apiKeys.length <= 1) return; // No rotar si solo hay una
+    if (apiKeys.length <= 1) return currentKeyIndex;
+    const anterior = currentKeyIndex + 1;
     currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-    console.log(`🔄 [Gemini Manager] Cambiando a API Key #${currentKeyIndex + 1} por límite de cuota.`);
+    console.log(`🔄 [Gemini] Rotando de la clave #${anterior} a la clave #${currentKeyIndex + 1}.`);
+    return currentKeyIndex;
 }
 
 // ============================================================================
@@ -99,35 +109,22 @@ async function fetchUrlContent(url) {
 // ============================================================================
 
 async function generateContentWithRetry(prompt, retries = 0) {
+    const claveActual = currentKeyIndex + 1;
     try {
         const model = getModel();
         const result = await model.generateContent(prompt);
         return result.response.text();
     } catch (error) {
-        // Detectar error 429 (Too Many Requests), 400 (Bad Request/Key) o errores de cuota
-        const isQuotaError = error.message.includes("429") || 
-                             error.message.includes("Quota exceeded") || 
-                             error.message.includes("Resource has been exhausted") ||
-                             error.message.includes("API key not valid") || 
-                             error.message.includes("400"); 
+        console.warn(`⛔ [Gemini] Error en la clave #${claveActual}: ${detalleErrorGemini(error)}`);
 
-        if (isQuotaError) {
-            console.warn(`⛔ [Gemini] Fallo en Key #${currentKeyIndex + 1} (Status: ${error.status || 'Quota/Auth'}). Detalle: ${error.message.substring(0, 40)}...`);
-            
-            // Si tenemos más claves y no hemos dado la vuelta completa
-            if (retries < apiKeys.length) {
-                rotateKey();
-                console.log(`🔄 [Gemini] Reintentando generación con nueva clave... (Intento ${retries + 1})`);
-                // Llamada recursiva con la nueva clave
-                return await generateContentWithRetry(prompt, retries + 1);
-            } else {
-                console.error("❌ [Gemini] ¡TODAS LAS CLAVES AGOTADAS! Esperando 60 segundos antes de fallar...");
-                // Espera de emergencia si todas las claves murieron para no colapsar el servidor
-                await new Promise(resolve => setTimeout(resolve, 60000));
-                throw new Error("Todas las cuotas de API agotadas.");
-            }
+        const quedanClaves = apiKeys.length > 1 && (retries + 1) < apiKeys.length;
+        if (quedanClaves) {
+            rotateKey();
+            return await generateContentWithRetry(prompt, retries + 1);
         }
-        throw error; // Si es otro error (ej. caída de internet), lo lanzamos
+
+        console.error(`❌ [Gemini] La clave #${claveActual} también falló. Ya se probaron ${apiKeys.length} clave(s).`);
+        throw error;
     }
 }
 
