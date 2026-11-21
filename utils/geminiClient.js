@@ -483,22 +483,36 @@ function esPreguntaFloja(pregunta) {
     return false;
 }
 
+function esInstruccionDePrompt(pregunta) {
+    const baja = pregunta.replace(/\s+/g, " ").trim().toLowerCase();
+    return /question\s*\d|pregunta\s*\d|2-3 questions|must mention|what do you think|controversy|each on a new line|ending in|primera pregunta concreta|segunda pregunta, distinta|tercera pregunta solo|pregunta concreta con un nombre|devolvé únicamente/.test(baja);
+}
+
 function preguntasDelTexto(texto, titulo) {
     const tituloNorm = String(titulo || "").replace(/\s+/g, " ").trim();
     const limpio = limpiarTextoIa(texto).replace(/\[(TITULAR|DESARROLLO|HASHTAGS|DEBATE|FIN)\]/gi, "\n");
-    const trozos = limpio
-        .split(/\n+/)
-        .flatMap(linea => linea.split(/(?<=\?)\s+/));
-    const vistos = new Set();
-    const buenas = [];
-
-    for (let pregunta of trozos) {
-        pregunta = pregunta.replace(/^[-*•\d.)\s]+/, "").replace(/^["“”']+|["“”']+$/g, "").trim();
+    const encontradas = [];
+    const marca = /¿/g;
+    let coincidencia;
+    while ((coincidencia = marca.exec(limpio))) {
+        const desde = coincidencia.index;
+        const cierre = limpio.indexOf("?", desde + 1);
+        const siguiente = limpio.indexOf("¿", desde + 1);
+        if (cierre === -1) break;
+        if (siguiente !== -1 && siguiente < cierre) continue;
+        let pregunta = limpio.slice(desde, cierre + 1).replace(/\s+/g, " ").trim();
         if (tituloNorm.length > 20) {
             pregunta = pregunta.replace(new RegExp(escaparRegExp(tituloNorm), "ig"), " ").replace(/\s+/g, " ").trim();
         }
-        if (/¿/.test(pregunta) && !/\?/.test(pregunta)) pregunta = `${pregunta}?`;
-        if (!/\?/.test(pregunta) || esPreguntaFloja(pregunta)) continue;
+        if (!pregunta.startsWith("¿") || !pregunta.endsWith("?")) continue;
+        if (pregunta.length < 30 || pregunta.length > 450) continue;
+        if (esPreguntaFloja(pregunta) || esInstruccionDePrompt(pregunta)) continue;
+        encontradas.push(pregunta);
+    }
+
+    const vistos = new Set();
+    const buenas = [];
+    for (const pregunta of encontradas) {
         const clave = pregunta.toLowerCase();
         if (vistos.has(clave)) continue;
         vistos.add(clave);
@@ -752,13 +766,13 @@ REGLAS:
 - Español claro, con los nombres, instituciones, lugares y el acontecimiento escritos de forma natural.
 
 EL DEBATE TIENE QUE SALIR DE HABER LEÍDO LA NOTICIA.
-- En [DEBATE] escribí solo dos o tres preguntas, cada una en su propia línea y terminada en signo de pregunta.
-- Cada pregunta tiene que mencionar un nombre, una institución, un lugar o un hecho que esté en la noticia.
-- Las preguntas tienen que permitir respuestas distintas. La gente tiene que poder no estar de acuerdo.
-- No abras con una frase. No cites el título. No escribas "¿Qué lectura hacés de lo que ocurrió?" ni "¿Qué opinás?" sin contexto.
-- Ejemplo del TIPO de pregunta, de otra noticia, no lo copies: "¿Hasta qué punto deben ser transparentes los funcionarios con su formación, sus contratos y su gestión?"
+- En [DEBATE] escribí solo dos o tres preguntas reales de esta noticia, en español.
+- Cada pregunta va en su propia línea, empieza con ¿ y termina con ?.
+- Cada una menciona un nombre, una institución, un lugar o un hecho que esté en la noticia, y permite respuestas distintas.
+- Prohibido copiar estas reglas. Prohibido escribir en inglés. Prohibido "Question 1", "Question 2", "Pregunta 1" o cualquier explicación del pedido.
+- No cites el título. No escribas "¿Qué opinás?" sin contexto.
 
-Devolvé únicamente estas secciones, sin markdown:
+Devolvé únicamente estas secciones, sin markdown y sin repetir las reglas:
 [TITULAR]
 Una sola línea, máximo 90 caracteres, específica de esta noticia.
 [DESARROLLO]
@@ -766,9 +780,7 @@ Entre 3 y 5 párrafos cortos separados por una línea en blanco. Qué pasó, qui
 [HASHTAGS]
 Entre 6 y 10 hashtags en una sola línea, sin repetir. El primero es #NoticiasLAT. El resto nombra el país, los protagonistas, las instituciones o el acontecimiento. Nada irrelevante.
 [DEBATE]
-¿Primera pregunta concreta, con un nombre o un hecho de esta noticia?
-¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?
-¿Tercera pregunta solo si abre otro ángulo real?
+Solo las preguntas reales. Nada de instrucciones.
 [FIN]`;
 }
 
@@ -781,12 +793,9 @@ NOTICIA:
 ${contexto}
 """
 
-Devolvé únicamente dos o tres preguntas. Cada una en su propia línea, terminada en "?".
-Cada pregunta tiene que nombrar un protagonista, una institución, un lugar o un hecho que esté escrito en la noticia.
-No cites el título. No hables de la app ni de los miembros. No escribas una introducción.
-
-¿Pregunta concreta con un nombre, institución o hecho de la noticia?
-¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?`;
+Devolvé únicamente las preguntas reales, en español. Una por línea. Cada línea empieza con ¿ y termina con ?.
+Cada pregunta nombra un protagonista, una institución, un lugar o un hecho escrito en la noticia.
+No copies este pedido. No escribas en inglés. No escribas "Question 1", "Question 2" ni "Pregunta 1". No cites el título.`;
 }
 
 async function construirTextosYoutube(titulo, textoLargo, _articleId, opciones = {}) {
