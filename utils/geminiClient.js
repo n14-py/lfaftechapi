@@ -470,23 +470,99 @@ function extraerSeccion(texto, inicio, fin) {
     return (cierre ? resto.slice(0, cierre.index) : resto).trim();
 }
 
-function debateValido(texto, titulo) {
-    let t = limpiarTextoIa(texto).replace(/Noticias\.lat/gi, "Noticias LAT");
-    t = t.replace(/\[(TITULAR|DESARROLLO|HASHTAGS|DEBATE|FIN)\]/gi, "").trim();
-    if (!t) return "";
-    if (/qu[eé] lectura hac[eé]s de lo que ocurri[oó]/i.test(t)) return "";
-    if (/Devolvé únicamente|Prohibido:/i.test(t)) return "";
-    const tituloNorm = String(titulo || "").replace(/\s+/g, " ").trim().toLowerCase();
-    const plano = t.replace(/\s+/g, " ").toLowerCase();
-    if (tituloNorm.length > 20 && plano.includes(tituloNorm)) return "";
-    if ((t.match(/\?/g) || []).length < 2) return "";
-    if (t.length > 850) {
-        const corte = t.slice(0, 850);
-        const ultimo = corte.lastIndexOf("?");
-        if (ultimo < 80) return "";
-        t = corte.slice(0, ultimo + 1).trim();
+function escaparRegExp(texto) {
+    return String(texto).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function esPreguntaFloja(pregunta) {
+    const baja = pregunta.replace(/\s+/g, " ").trim().toLowerCase();
+    if (baja.length < 30) return true;
+    if (/qu[eé] lectura hac[eé]s de lo que ocurri[oó]/.test(baja)) return true;
+    if (/^¿?\s*qu[eé] (opinas|opinás|pensás|piensas)\s*\??$/.test(baja)) return true;
+    if (/devolvé únicamente|prohibido:/.test(baja)) return true;
+    return false;
+}
+
+function preguntasDelTexto(texto, titulo) {
+    const tituloNorm = String(titulo || "").replace(/\s+/g, " ").trim();
+    const limpio = limpiarTextoIa(texto).replace(/\[(TITULAR|DESARROLLO|HASHTAGS|DEBATE|FIN)\]/gi, "\n");
+    const trozos = limpio
+        .split(/\n+/)
+        .flatMap(linea => linea.split(/(?<=\?)\s+/));
+    const vistos = new Set();
+    const buenas = [];
+
+    for (let pregunta of trozos) {
+        pregunta = pregunta.replace(/^[-*•\d.)\s]+/, "").replace(/^["“”']+|["“”']+$/g, "").trim();
+        if (tituloNorm.length > 20) {
+            pregunta = pregunta.replace(new RegExp(escaparRegExp(tituloNorm), "ig"), " ").replace(/\s+/g, " ").trim();
+        }
+        if (/¿/.test(pregunta) && !/\?/.test(pregunta)) pregunta = `${pregunta}?`;
+        if (!/\?/.test(pregunta) || esPreguntaFloja(pregunta)) continue;
+        const clave = pregunta.toLowerCase();
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        buenas.push(pregunta);
+        if (buenas.length === 3) break;
     }
-    return t;
+    return buenas;
+}
+
+function debateValido(texto, titulo) {
+    const preguntas = preguntasDelTexto(texto, titulo);
+    if (preguntas.length < 2) return "";
+    return preguntas.join("\n\n");
+}
+
+function anclasDeLaNoticia(titulo, texto) {
+    const fuente = `${titulo || ""}. ${texto || ""}`;
+    const encontrados = fuente.match(/\b[A-ZÁÉÍÓÚÜÑ][\p{L}’']+(?:\s+[A-ZÁÉÍÓÚÜÑ][\p{L}’']+){1,3}\b/gu) || [];
+    const corte = new Set(["El", "La", "Los", "Las", "Un", "Una", "En", "Por", "Del", "Al", "Su", "Sus", "Este", "Esta", "Esto", "Ese", "Esa", "Eso", "Noticias", "The"]);
+    const unicos = [];
+    for (const bruto of encontrados) {
+        const partes = bruto.trim().split(/\s+/).filter(parte => !corte.has(parte));
+        if (partes.length < 2) continue;
+        const nombre = partes.join(" ");
+        if (nombre.length < 5) continue;
+        if (unicos.some(item => item.toLowerCase() === nombre.toLowerCase())) continue;
+        unicos.push(nombre);
+        if (unicos.length === 4) break;
+    }
+    return unicos;
+}
+
+function fraseAncla(titulo, texto) {
+    const oraciones = String(texto || titulo || "")
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!?])\s+/)
+        .map(oracion => oracion.trim())
+        .filter(oracion => oracion.length > 40);
+    const base = oraciones[0] || String(titulo || "").trim();
+    return base.replace(/[.!?]+$/, "").slice(0, 140).trim();
+}
+
+function preguntasDeRespaldo(titulo, texto) {
+    const nombres = anclasDeLaNoticia(titulo, texto);
+    const principal = nombres[0];
+    const segundo = nombres.find(nombre => nombre.toLowerCase() !== String(principal || "").toLowerCase());
+    if (principal && segundo) {
+        return [
+            `¿Hasta qué punto ${principal} tiene que explicar lo que hizo, y qué parte de esa explicación sigue faltando?`,
+            `¿Te parece que lo que se sabe de ${segundo} alcanza, o todavía tienen que responder con datos más claros?`
+        ].join("\n\n");
+    }
+    if (principal) {
+        return [
+            `¿Qué debería aclarar ${principal} antes de que esta historia se dé por cerrada?`,
+            `¿Con lo que ya se sabe de ${principal} se puede opinar, o hace falta un control más estricto?`
+        ].join("\n\n");
+    }
+    const hecho = fraseAncla(titulo, texto);
+    if (!hecho) return "";
+    return [
+        `¿Hasta dónde estás de acuerdo con esto: ${hecho}?`,
+        "¿Hace falta otra explicación además de lo que ya se contó, o con esos datos alcanza para juzgar el caso?"
+    ].join("\n\n");
 }
 
 function normalizarHashtags(lista, esShort) {
@@ -619,7 +695,7 @@ function armarDescripcionYComentario(piezas) {
     }
 
     const candidato = piezas.debate || [piezas.pregunta, piezas.preguntaComplementaria].filter(Boolean).join("\n\n");
-    const debate = debateValido(candidato, piezas.titulo);
+    const debate = debateValido(candidato, piezas.titulo) || preguntasDeRespaldo(piezas.titulo, piezas.textoReal);
     const comentarioPartes = ["💬 ¡Queremos conocer tu opinión!", ""];
     if (debate) comentarioPartes.push(debate, "");
     comentarioPartes.push(
@@ -676,11 +752,11 @@ REGLAS:
 - Español claro, con los nombres, instituciones, lugares y el acontecimiento escritos de forma natural.
 
 EL DEBATE TIENE QUE SALIR DE HABER LEÍDO LA NOTICIA.
-- Abrí con una frase corta que nombre el conflicto real que el texto deja abierto. No des un veredicto.
-- Después escribí dos o tres preguntas concretas. Cada una tiene que mencionar un nombre, una institución, un lugar o un hecho que esté en la noticia.
+- En [DEBATE] escribí solo dos o tres preguntas, cada una en su propia línea y terminada en signo de pregunta.
+- Cada pregunta tiene que mencionar un nombre, una institución, un lugar o un hecho que esté en la noticia.
 - Las preguntas tienen que permitir respuestas distintas. La gente tiene que poder no estar de acuerdo.
-- Prohibido citar el título. Prohibido "¿Qué lectura hacés de lo que ocurrió en «título»?". Prohibido "¿Qué opinás?" sin contexto.
-- Ejemplo del TIPO de pregunta, de otra noticia, no lo copies: "¿Hasta qué punto deben ser transparentes los funcionarios con su formación, sus contratos y su gestión? ¿Las investigaciones periodísticas alcanzan para exigir respuestas o hacen falta controles más rigurosos?"
+- No abras con una frase. No cites el título. No escribas "¿Qué lectura hacés de lo que ocurrió?" ni "¿Qué opinás?" sin contexto.
+- Ejemplo del TIPO de pregunta, de otra noticia, no lo copies: "¿Hasta qué punto deben ser transparentes los funcionarios con su formación, sus contratos y su gestión?"
 
 Devolvé únicamente estas secciones, sin markdown:
 [TITULAR]
@@ -690,7 +766,9 @@ Entre 3 y 5 párrafos cortos separados por una línea en blanco. Qué pasó, qui
 [HASHTAGS]
 Entre 6 y 10 hashtags en una sola línea, sin repetir. El primero es #NoticiasLAT. El resto nombra el país, los protagonistas, las instituciones o el acontecimiento. Nada irrelevante.
 [DEBATE]
-La frase y las preguntas del debate.
+¿Primera pregunta concreta, con un nombre o un hecho de esta noticia?
+¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?
+¿Tercera pregunta solo si abre otro ángulo real?
 [FIN]`;
 }
 
@@ -703,14 +781,12 @@ NOTICIA:
 ${contexto}
 """
 
-Devolvé solo el debate, sin markdown y sin hablar de la app ni de miembros:
-una frase con el conflicto que sí está en el texto, sin veredicto y sin inventar datos.
+Devolvé únicamente dos o tres preguntas. Cada una en su propia línea, terminada en "?".
+Cada pregunta tiene que nombrar un protagonista, una institución, un lugar o un hecho que esté escrito en la noticia.
+No cites el título. No hables de la app ni de los miembros. No escribas una introducción.
 
 ¿Pregunta concreta con un nombre, institución o hecho de la noticia?
-¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?
-¿Tercera pregunta solo si abre otro ángulo real?
-
-Prohibido: repetir el título, "qué lectura hacés de lo que ocurrió" y "qué opinás" pelado.`;
+¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?`;
 }
 
 async function construirTextosYoutube(titulo, textoLargo, _articleId, opciones = {}) {
@@ -728,11 +804,12 @@ async function construirTextosYoutube(titulo, textoLargo, _articleId, opciones =
     const contexto = String(textoLargo || "").substring(0, 12000);
 
     try {
-        const copys = parsearCopys(await generateContentWithRetry(promptCopys(tituloSeguro, contexto)));
+        const rawCopys = await generateContentWithRetry(promptCopys(tituloSeguro, contexto));
+        const copys = parsearCopys(rawCopys);
         piezas.titular = copys.titular;
         piezas.desarrollo = copys.desarrollo;
         piezas.hashtags = copys.hashtags;
-        piezas.debate = copys.debate;
+        piezas.debate = debateValido(copys.debate, titulo) || debateValido(rawCopys, titulo);
     } catch (error) {
         console.warn(`  [YouTube Copy] La IA no armó la bajada (${error.message}). Se usa el texto real de la noticia, sin inventar datos.`);
     }
@@ -741,17 +818,26 @@ async function construirTextosYoutube(titulo, textoLargo, _articleId, opciones =
         try {
             const rawDebate = await generateContentWithRetry(promptDebate(tituloSeguro, contexto));
             const marcado = extraerSeccion(rawDebate, "DEBATE", "FIN");
-            piezas.debate = marcado || String(rawDebate || "").replace(/```/g, "").trim();
+            piezas.debate = debateValido(marcado, titulo) || debateValido(rawDebate, titulo);
         } catch (error) {
             console.warn(`  [YouTube Copy] No se pudo abrir el debate (${error.message}).`);
-            piezas.debate = "";
         }
     }
 
+    if (!debateValido(piezas.debate, titulo)) {
+        piezas.debate = preguntasDeRespaldo(titulo, contexto);
+        console.warn("  [YouTube Copy] El debate de la IA no trajo dos preguntas. Se arman con los datos de esta noticia.");
+    }
+
     const textos = armarDescripcionYComentario(piezas);
-    console.log(`  [YouTube Copy] Descripción (${textos.youtube_description.length} caracteres) y comentario listos.`);
+    const preguntas = ((debateValido(piezas.debate, titulo) || "").match(/\?/g) || []).length;
+    console.log(`  [YouTube Copy] Descripción (${textos.youtube_description.length} caracteres) y comentario con ${preguntas} preguntas.`);
     return textos;
 }
+
+exports.debateValido = debateValido;
+exports.preguntasDeRespaldo = preguntasDeRespaldo;
+exports.armarDescripcionYComentario = armarDescripcionYComentario;
 
 // ============================================================================
 // CREADOR DE ESCENAS PARA VIDEOS HORIZONTALES LARGOS (DIRECTOR DE TV ESTRICTO)
