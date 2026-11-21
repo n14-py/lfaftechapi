@@ -29,6 +29,19 @@ assert.ok(!conTitulo.toLowerCase().includes(tituloFuncionarios.toLowerCase()));
 
 assert.strictEqual(debateValido("¿Qué opinás?", tituloFuncionarios), "");
 
+const filtrado = debateValido(
+    "2-3 questions, each on a new line, ending in '?'. Must mention a name, institution, place, or fact from the news. Must allow different answers (controversy/debate). No generic \"What do you think?\". Question 1: ¿Deberían las organizaciones estudiantiles y los sindicatos liderar la agenda de las demandas económicas en Europa? Question 2: ¿Es la crisis de acceso a la vivienda el principal motor de la movilización juvenil en los más de 25 países involucrados?",
+    "Protestas juveniles en Europa"
+);
+assert.strictEqual((filtrado.match(/\?/g) || []).length, 2);
+assert.ok(filtrado.includes("organizaciones estudiantiles"));
+assert.ok(filtrado.includes("acceso a la vivienda"));
+assert.ok(!/question\s*\d|2-3 questions|what do you think/i.test(filtrado));
+assert.strictEqual(
+    debateValido("¿Primera pregunta concreta, con un nombre o un hecho de esta noticia?\n¿Segunda pregunta, distinta, para que dos personas puedan responder distinto?", tituloFuncionarios),
+    ""
+);
+
 const comentario = armarDescripcionYComentario({
     titulo: tituloFuncionarios,
     textoReal: textoFuncionarios,
