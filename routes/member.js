@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const memberController = require('../controllers/memberController');
+const supporters = require('../utils/youtubeSupporters');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -48,6 +49,7 @@ const upload = multer({
 // ==========================================
 
 // Ruta para verificar y sincronizar membresías (No necesita foto)
+router.get('/supporters', supporters.listPublicSupporters);
 router.post('/sync', memberController.verifyAndSyncMember);
 
 // Ruta para publicar noticia y video (Necesita procesar la 'image')

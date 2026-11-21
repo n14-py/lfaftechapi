@@ -44,6 +44,7 @@ exports.getStaticSitemap = (req, res) => {
         '/juegos',
         '/feed',
         '/sobre-nosotros',
+        '/miembros',
         '/contacto',
         '/politica-privacidad',
         '/terminos'
